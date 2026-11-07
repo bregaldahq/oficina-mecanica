@@ -1,0 +1,7 @@
+# Os repositórios ficam aqui, cada um com o próprio Git.
+repos/
+
+# Configuração pessoal do Claude Code
+.claude/settings.local.json
+
+__pycache__/

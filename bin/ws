@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+#
+# Operações em lote nos repositórios listados em repos.txt.
+#
+# Uso:
+#   bin/ws clone              clona o que falta em repos/
+#   bin/ws link <dir>         usa clones que já existem em <dir> (symlink), sem clonar de novo
+#   bin/ws pull               fast-forward da branch atual de cada repo
+#   bin/ws status             branch, sujeira e divergência com o remoto
+#   bin/ws prs                PRs abertos em cada repo
+#   bin/ws run <comando...>   executa o comando dentro de cada repo
+#
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+OWNER="${OFICINA_OWNER:-bregaldahq}"
+REPOS_DIR="$ROOT/repos"
+
+repos() {
+  grep -vE '^\s*(#|$)' "$ROOT/repos.txt" | awk '{print $1}'
+}
+
+each() {
+  for name in $(repos); do
+    if [[ ! -d "$REPOS_DIR/$name" ]]; then
+      echo "== $name (ausente — rode bin/ws clone)"
+      continue
+    fi
+    "$@" "$name"
+  done
+}
+
+cmd_clone() {
+  mkdir -p "$REPOS_DIR"
+  for name in $(repos); do
+    if [[ -e "$REPOS_DIR/$name" ]]; then
+      echo "== $name: já existe"
+    else
+      echo "== $name: clonando"
+      # Com gh usa o protocolo configurado nele (ssh ou https); sem gh, https puro.
+      if command -v gh >/dev/null 2>&1; then
+        gh repo clone "$OWNER/$name" "$REPOS_DIR/$name" -- --quiet
+      else
+        git clone --quiet "https://github.com/$OWNER/$name.git" "$REPOS_DIR/$name"
+      fi
+    fi
+  done
+}
+
+cmd_link() {
+  local src="${1:?uso: bin/ws link <dir-com-os-clones>}"
+  src="$(cd "$src" && pwd)"
+  mkdir -p "$REPOS_DIR"
+  for name in $(repos); do
+    if [[ -e "$REPOS_DIR/$name" ]]; then
+      echo "== $name: já existe em repos/"
+    elif [[ -d "$src/$name/.git" || -f "$src/$name/.git" ]]; then
+      ln -s "$src/$name" "$REPOS_DIR/$name"
+      echo "== $name: ligado a $src/$name"
+    else
+      echo "== $name: não encontrado em $src"
+    fi
+  done
+}
+
+pull_one() {
+  echo "== $1"
+  git -C "$REPOS_DIR/$1" pull --ff-only --quiet || echo "   (não foi possível fast-forward)"
+}
+
+status_one() {
+  local dir="$REPOS_DIR/$1" branch dirty ahead behind
+  git -C "$dir" fetch --quiet 2>/dev/null || true
+  branch="$(git -C "$dir" branch --show-current)"
+  dirty="$(git -C "$dir" status --porcelain | wc -l | tr -d ' ')"
+  if git -C "$dir" rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1; then
+    read -r behind ahead < <(git -C "$dir" rev-list --left-right --count '@{u}...HEAD')
+  else
+    ahead="-"; behind="-"
+  fi
+  printf '%-34s %-40s sujos:%-3s +%-3s -%s\n' "$1" "$branch" "$dirty" "$ahead" "$behind"
+}
+
+prs_one() {
+  echo "== $1"
+  gh pr list --repo "$OWNER/$1" --state open \
+    --json number,title,headRefName,baseRefName \
+    --template '{{range .}}  #{{.number}} {{.headRefName}} -> {{.baseRefName}}  {{.title}}{{"\n"}}{{end}}'
+}
+
+run_one() {
+  local name="$1"; shift
+  echo "== $name"
+  (cd "$REPOS_DIR/$name" && "$@") || echo "   (saiu com erro)"
+}
+
+case "${1:-}" in
+  clone)  cmd_clone ;;
+  link)   shift; cmd_link "$@" ;;
+  pull)   each pull_one ;;
+  status) each status_one ;;
+  prs)    each prs_one ;;
+  run)
+    shift
+    [[ $# -gt 0 ]] || { echo "uso: bin/ws run <comando...>"; exit 1; }
+    for name in $(repos); do
+      [[ -d "$REPOS_DIR/$name" ]] && run_one "$name" "$@"
+    done
+    ;;
+  *)
+    sed -n '3,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    exit 1
+    ;;
+esac

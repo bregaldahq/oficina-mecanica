@@ -1,0 +1,7 @@
+# Repositórios do workspace, na ordem de apply (destroy é a ordem inversa).
+# Formato: <nome> <papel>
+# O owner no GitHub vem de OFICINA_OWNER (padrão: bregaldahq).
+oficina-infra-database          fundacao: VPC, RDS, segredos, migrations
+oficina-infra-k8s               cluster: EKS, add-ons, ECR, NLB interno
+oficina-lambda-auth             borda: Lambdas auth-cpf e jwt-authorizer, API Gateway
+oficina-mecanica-tech-challenge aplicacao: API PHP, deploy kustomize, contratos e ADRs
