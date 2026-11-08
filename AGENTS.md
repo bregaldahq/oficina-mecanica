@@ -419,6 +419,54 @@ o docker compose (`make up` antes) e o `make k8s-render` precisa de kubectl.
 - **Terraform**: ambientes em `envs/hml.tfvars` e `envs/prod.tfvars`, não em workspaces. Tags
   obrigatórias `Project`, `Environment`, `ManagedBy`, `Repo`.
 
+## Comandos
+
+O que o usuário digita no Claude Code, e o que acontece. As skills ficam em `.claude/skills/`.
+
+| Comando | Quando |
+|---|---|
+| `/status-geral` | "como está tudo": branch, sujeira, PRs e CI dos quatro repos, só o que pede ação |
+| `/verificar [repo]` | "isso está ok?": o que o CI roda, local e sem AWS, só com as falhas |
+| `/checar-contratos` | antes de PR de infra, depois de um pull, ou quando algo "funciona num repo e quebra no outro" |
+| `/mudanca-cross-repo <descrição>` | qualquer mudança que toca mais de um repo; começa em plan mode |
+| `/nova-migration <descrição>` | coluna, tabela ou índice novo |
+| `/novo-endpoint <descrição>` | rota nova na API (e no gateway, se for pública) |
+| `/mudar-jwt <descrição>` | claim, expiração ou validação do token |
+| `/novo-parametro-ssm <descrição>` | expor, renomear ou remover um valor entre repos |
+| `/novo-segredo <descrição>` | segredo ou chave de segredo nova |
+| `/corrigir-ci [branch ou link]` | "o CI quebrou" |
+| `/abrir-prs` | publicar uma mudança pronta: PRs draft, na ordem de apply, ligados entre si |
+| `/revisar-pr <repo> <número>` | revisar um PR (ou os irmãos dele) antes de mergear |
+| `/release` | preparar `develop` → `main` |
+| `/atualizar-dependencias [repo]` | Composer, providers, actions, layers e EKS desatualizados |
+| `/registrar-licao` | logo depois de corrigir o agente: a correção vira teste, checagem, hook ou regra |
+
+Comandos do próprio Claude Code que encaixam no fluxo:
+
+- **plan mode** (Shift+Tab): para mudança cross-repo;
+- `/code-review` e `/security-review`: antes de `/abrir-prs`;
+- `/simplify`: depois de uma mudança grande;
+- `/loop 5m /status-geral`: para acompanhar o CI dos PRs enquanto a sessão está aberta;
+- `/fewer-permission-prompts`: depois de umas semanas de uso, para liberar os comandos de
+  leitura que mais pedem confirmação.
+
+## Definição de Pronto
+
+Uma mudança só está pronta, e só sai em PR, quando:
+
+1. `bin/ws verify --changed` termina em `OK`. Use `--image` se mexeu em `Dockerfile` ou
+   `docker/` da app.
+2. `bin/check-contracts.py` não tem `erro`. `aviso` novo de documento pede adendo no
+   `CONTRATOS.md`.
+3. O subagente `guardiao-de-contratos` não tem achado grave sobre o diff (`bin/ws diff --patch`).
+4. Se o contrato mudou, o `CONTRATOS.md` mudou no mesmo conjunto de PRs, como adendo.
+5. O usuário recebeu um resumo:
+   - o que mudou em cada repo e em que ordem fazer o merge;
+   - o que foi verificado aqui;
+   - o que só o CI consegue verificar (`terraform plan`, deploy, smoke).
+
+Os PRs saem com `/abrir-prs`, e só quando o usuário pedir.
+
 ## Regras para agentes
 
 1. **Nunca** rode `terraform apply`/`destroy`, `kubectl apply`/`delete` nem dispare

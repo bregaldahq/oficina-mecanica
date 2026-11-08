@@ -33,7 +33,7 @@ qualquer sessão (**corrigido**, ver o Andamento), conseguir **verificar** o que
 | 2 | Checagem de contrato completa | o maior risco do sistema está *entre* os repos | ✅ |
 | 3 | Hooks e guardrails | regra escrita vira regra executada; toda sessão termina verificada | ✅ |
 | 4 | Contexto em camadas | contexto certo, na hora certa, mais barato | ✅ (PRs e 4.2 pendentes) |
-| 5 | Comandos: skills e subagentes | cada mudança típica vira um comando seu | 2–3 dias |
+| 5 | Comandos: skills e subagentes | cada mudança típica vira um comando seu | ✅ |
 | 6 | A sessão interativa | menos interrupção, status visível, sessões paralelas | ½ dia |
 | 7 | Medir e melhorar o harness | saber se cada mudança no harness ajudou | 1 dia + contínuo |
 | 8 | Avançado (opcional) | e2e entre repos sem AWS, MCP | sob demanda |
@@ -51,6 +51,7 @@ qualquer sessão (**corrigido**, ver o Andamento), conseguir **verificar** o que
 | 2026-11-07 | 3 Hooks e guardrails | Os hooks ficaram em Python, em `.claude/hooks/`: `guard-bash.py` (PreToolUse Bash), `guard-edit.py` (PreToolUse Edit/Write), `after-edit.py` (PostToolUse: `terraform fmt` e lembretes de contrato, um por sessão), `verify-on-stop.py` (Stop) e `session-start.py` (SessionStart: `ensure-repos`, estado inicial e `bin/ws context`). O `Stop` só roda o `verify` quando a impressão digital dos repos (`wslib.fingerprint`, ~40 ms) difere do início da sessão e do último verde. Sem mudança, sai em 70 ms; com mudança, cerca de 14 s. Os git hooks `githooks/commit-msg` e `githooks/pre-push` (que verifica a árvore que está subindo, inclusive num `ws isolate`) entram com `bin/ws hooks install`, que só funciona depois do merge, porque aponta para o checkout principal. São 12 testes em `tests/test_hooks.py`, cobrindo cerca de 75 comandos, com mutação conferida. |
 | 2026-11-07 | 4 Contexto | `AGENTS.md` + `CLAUDE.md` (`@AGENTS.md`) escritos para os 4 repos de produto, a partir de `develop`, na branch local **`chore/agents-md`** de cada um (commitada, **sem push**). Cobrem o que o repo cria, os contratos que publica e consome (conferidos no `data.tf`/`ssm.tf`), como validar sem AWS, as armadilhas (sintoma → causa → o que pega), as convenções e, na app, o glossário. Hook novo `repo-context.py` (PostToolUse de Read/Edit/Write/Grep/Glob) injeta o `AGENTS.md` do repo uma vez por sessão. O DOC-1 passou a conferir os caminhos citados nesses arquivos. O `AGENTS.md` do workspace dizia nodes `t3.small`; em `develop` são `t3.medium` (corrigido). |
 | 2026-11-07 | Achados ao rodar em `develop` | Falso positivo do `NOME-1` com comentário no fim da linha da tag (corrigido, com teste). O `deploy.yml` da fundação em `develop` é YAML inválido (achado 21): a correção ficou na branch local **`fix/deploy-yml-invalido`** (sem push). O passo do actionlint no `verify` passou a ser `workflows`, bloqueante e sem o shellcheck embutido. |
+| 2026-11-07 | 5 Comandos | 12 skills novas: `verificar`, `nova-migration`, `novo-endpoint`, `mudar-jwt`, `novo-parametro-ssm`, `novo-segredo`, `corrigir-ci`, `abrir-prs`, `revisar-pr`, `release`, `atualizar-dependencias` e `registrar-licao`. Mais `templates/pr-body.md` e 3 subagentes novos: `verificador` (haiku), `revisor-ddd` e `revisor-terraform`. Cada receita cita os arquivos e padrões reais (conferidos: o padrão `PREPARE`/`EXECUTE` do `002`, `requireRole('customer', 'admin')`, `RequestValidator`, a IRSA do ESO). Definição de Pronto e catálogo de comandos no `AGENTS.md`. `tests/test_contexto.py` confere o frontmatter, que skills e subagentes citados existem e que os hooks do settings existem e são executáveis. |
 | 2026-11-07 | 5.1 (antecipado) | Skill `status-geral` usava `gh run list --branch`, que não existe no `gh` 2.4 desta máquina: passou a usar `bin/ws context` e `bin/ws ci`. `mudanca-cross-repo` passou a usar `ws branch`/`isolate`/`verify`/`diff`/`prs --branch`. `AGENTS.md`, `README` e `Makefile` (`make verify`, `make doctor`) atualizados. |
 
 ---
@@ -489,7 +490,12 @@ com ≤ 8 KB.
 
 ---
 
-### Fase 5 — Comandos: skills e subagentes · 2–3 dias
+### Fase 5 — Comandos: skills e subagentes · ✅ feita
+
+> **Como ficou (2026-11-07).** Tudo da tabela, exceto `/investigar-incidente`. Ele depende de uma
+> chave de leitura do New Relic na sessão, e entregar credencial ao agente é decisão sua (ver a
+> decisão 5). A Definição de Pronto ficou no `AGENTS.md`, num lugar só, e as receitas apontam
+> para ela.
 
 **Objetivo:** cada mudança típica (a tabela "Onde mexer para…") vira um comando que você digita
 e que termina sempre na mesma Definição de Pronto.
