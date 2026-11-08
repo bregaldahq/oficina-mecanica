@@ -146,7 +146,7 @@ Cada fase tem objetivo, tarefas (com arquivos), critério de aceite (um comando 
 esforço. Mudança em repo de produto segue as convenções do `AGENTS.md`: a mesma branch em cada
 repo, PR para `develop`, Conventional Commits em português.
 
-### Fase 0 — Consertar a base · ½ dia
+### Fase 0 — Consertar a base · parcial (0.3 a 0.5 feitos; 0.1, 0.2 e 0.6 dependem das decisões 1, 2, 4 e 5)
 
 **Objetivo:** o agente enxerga os quatro repos reais, sem duplicata, em qualquer sessão, e não
 consegue fazer estrago.
@@ -669,14 +669,16 @@ deveria cair, e a mesma lição não deveria aparecer duas vezes.
 
 ---
 
-## 4. Cronograma sugerido
+## 4. Cronograma
 
-| Semana | Fases | Entregáveis | PRs |
-|---|---|---|---|
-| 1 | 0 (resto), 1, 3.1–3.2 | Clones planos, `ws verify`/`doctor`/`isolate`, guard de Bash e Edit | workspace; 4 repos `ci/verificacao-local` |
-| 2 | 2, 3.3–3.6, 4 | Checker completo com testes, hook `Stop` verificando, git hooks, `AGENTS.md` por repo | workspace; 4 repos `chore/agents-md` + `ci/scripts-de-verificacao` |
-| 3 | 5, 6, 7 | Comandos novos, subagentes, status line, tarefas-canário com uma primeira rodada de referência | workspace |
-| depois | 8 | e2e local, se valer a pena | workspace |
+| Quando | O quê | Status |
+|---|---|---|
+| 2026-11-07/08 | Fases 0 (parte do workspace) a 7, nesta branch (`claude/harness-ai-automation-plan-a03530`) | ✅ |
+| depois das decisões 1 e 2 | Resto da Fase 0: commits locais, clones planos, worktrees velhos, `.ignore` | pendente |
+| depois da decisão 6 | PRs nos repos de produto: `chore/agents-md` (4 repos) e `fix/deploy-yml-invalido` (fundação), já prontos localmente; 1.1, 1.3 e achados 17 a 20, a fazer | pendente |
+| depois do merge dos `chore/agents-md` | 4.2: enxugar o `AGENTS.md` do workspace | pendente |
+| depois do merge desta branch | `bin/ws hooks install`; rodada de referência das tarefas-canário (7.2) | pendente |
+| sob demanda | Fase 8 (e2e local entre repos, MCP do Terraform) | não iniciada |
 
 ## 5. Decisões que dependem de você
 
@@ -707,50 +709,34 @@ deveria cair, e a mesma lição não deveria aparecer duas vezes.
 
 ## 7. Próximos passos
 
-1. Achado 16 (OIDC): enquanto não for resolvido, nenhum deploy nem plan roda.
-2. Responder as decisões 1, 2, 4, 5 e 6.
-3. Com 1 e 2 respondidas, terminar a Fase 0: preservar os commits, clones planos, limpar os
-   worktrees velhos e testar o `.ignore`.
-4. Fases 2 em diante, no workspace, sem depender das decisões.
+1. **Achado 16 (OIDC):** enquanto a policy de confiança dos roles `oficina-gha-*` não aceitar
+   os nomes novos dos repos, nenhum deploy nem plan roda. Só você tem acesso.
+2. **Revisar e mergear esta branch** no repositório principal. Depois, na raiz do checkout
+   principal: `bin/ws hooks install` e `bin/ws doctor`.
+3. **Decisões 1, 2, 4, 5 e 6** (seção 5). Com a 6, eu abro os PRs que já estão prontos
+   localmente:
+   - `chore/agents-md` nos 4 repos;
+   - `fix/deploy-yml-invalido` na fundação.
+4. **Rodada de referência** das tarefas-canário (7.2), numa sessão nova.
+5. **Depois do merge dos `chore/agents-md`:** enxugar o `AGENTS.md` do workspace (4.2).
 
 ---
 
-## Apêndice A — Hooks e permissões que entram nas próximas fases
+## Apêndice A — Configuração do Claude Code
 
-O `.claude/settings.json` atual já tem as permissões revisadas (inclusive as dos comandos da
-Fase 1) e o hook `SessionStart`. Isto é o que se soma a ele:
+Está em `.claude/settings.json`, que é a fonte da verdade:
 
-```json
-{
-  "env": { "AWS_PROFILE": "oficina-readonly" },
-  "permissions": {
-    "allow": [ "Bash(bin/ws statusline)" ],
-    "ask": [ "Bash(bin/ws hooks:*)" ]
-  },
-  "hooks": {
-    "SessionStart": [
-      { "hooks": [
-        { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/ensure-repos.sh", "timeout": 10 },
-        { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/bin/ws context", "timeout": 30 }
-      ] }
-    ],
-    "PreToolUse": [
-      { "matcher": "Bash", "hooks": [
-        { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/guard-bash.py" } ] },
-      { "matcher": "Edit|Write|MultiEdit|NotebookEdit", "hooks": [
-        { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/guard-edit.py" } ] }
-    ],
-    "PostToolUse": [
-      { "matcher": "Edit|Write|MultiEdit", "hooks": [
-        { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/after-edit.py" } ] }
-    ],
-    "Stop": [
-      { "hooks": [
-        { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/verify-on-stop.sh", "timeout": 120 } ] }
-    ]
-  }
-}
-```
+- **`permissions`:** leitura e `bin/ws` liberados; push, PR, `bin/ws branch`/`isolate`/`hooks`
+  e operações git destrutivas pedem confirmação; infra, segredos, merge e force push negados.
+- **`hooks`:**
+  - `SessionStart`: `session-start.py`;
+  - `PreToolUse`: `guard-bash.py` (Bash) e `guard-edit.py` (Edit/Write/MultiEdit/NotebookEdit);
+  - `PostToolUse`: `after-edit.py` (Edit/Write/MultiEdit) e `repo-context.py`
+    (Read/Edit/Write/MultiEdit/Grep/Glob);
+  - `Stop`: `verify-on-stop.py`.
+- **`statusLine`:** `bin/ws statusline`.
+
+Falta só o `"env": {"AWS_PROFILE": "oficina-readonly"}`, que depende da decisão 5.
 
 ## Apêndice B — Regras do `guard-bash.py`
 
