@@ -55,8 +55,9 @@ Cliente ── GET /api/... + Bearer ──► API Gateway ──► Lambda jwt-
 - **Regra de negócio** fica só na aplicação, `oficina-api`.
 
 Dois papéis no JWT: `customer` (token vem do `POST /auth/cpf` da Lambda) e `admin` (token vem
-do `POST /api/auth/login` da aplicação). O mesmo `JwtProvider` existe nos dois repos, copiado byte
-a byte.
+do `POST /api/auth/login` da aplicação). Há um `JwtProvider` em cada repo. Namespace, comentários
+e imports diferem, mas a montagem do token é idêntica, e o teste de contrato dos dois lados trava
+isso.
 
 ## Como funciona cada repo
 
@@ -94,8 +95,9 @@ Quem executa é o Job da aplicação, não este repo. Toda migration precisa ser
 O `pr.yml` aplica todas as migrations **duas vezes** num MySQL real, para provar a idempotência.
 O modelo de dados está documentado em `docs/MODELO-DE-DADOS.md`.
 
-**Validar.** `terraform fmt -check -recursive` e `terraform init -backend=false && terraform validate`.
-Para as migrations, suba um container `mysql:8.0` e aplique os arquivos em ordem, duas vezes.
+**Validar.** `bin/ws verify --repo fundacao`. Ele roda `fmt` e `validate` e aplica as
+migrations duas vezes num MySQL 8.0 descartável, como o `pr.yml`. O `.terraform.lock.hcl` é
+ignorado neste repo, então cada `init` resolve os providers de novo.
 
 ### `oficina-infra-cluster` — cluster
 
@@ -105,7 +107,7 @@ dos segredos.
 
 **O que cria.**
 - `eks.tf`: cluster EKS (versão em `envs/*.tfvars`, hoje `1.31`) e um managed node group de
-  `t3.small`, de 2 a 4 nodes, nas **subnets públicas** com IP público. Cada node recebe o SG do
+  `t3.medium`, de 2 a 4 nodes, nas **subnets públicas** com IP público. Cada node recebe o SG do
   node, o SG do cluster e o SG crachá do banco. `capacity_type` é `SPOT` em hml e `ON_DEMAND`
   em prod.
 - `ecr.tf`: repositório `oficina-api`, com scan on push e retenção das últimas 10 imagens.
@@ -131,8 +133,8 @@ dos segredos.
 - Há um `destroy.yml` que só roda por disparo manual e pede que você digite o nome do ambiente.
   Agente não dispara.
 
-**Validar.** `terraform fmt`, `terraform init -backend=false`, `terraform validate` (o CI também
-roda `tflint`).
+**Validar.** `bin/ws verify --repo cluster`: `fmt`, `validate` sem backend e `tflint`, este
+não bloqueante, como no CI. O `.terraform.lock.hcl` também é ignorado aqui.
 
 ### `oficina-gateway-auth` — borda e autenticação
 
@@ -148,7 +150,8 @@ entre elas é o `handler`. Assim, quem emite e quem valida o token rodam o mesmo
   - emite o JWT com `role=customer`.
 - `Handler/JwtAuthorizerHandler.php` é o authorizer REQUEST com *simple response*. Ele valida
   assinatura e `exp` e devolve `context.customerId` e `context.role`.
-- `Security/JwtProvider.php`: cópia byte a byte do `JwtProvider` da aplicação.
+- `Security/JwtProvider.php`: monta o token exatamente como o `JwtProvider` da aplicação. O
+  arquivo não é idêntico (namespace, comentários); o que precisa ser igual é o token.
 - `Secrets/SecretsManagerProvider.php`: guarda o segredo em cache estático entre invocações. Uma
   rotação só é percebida quando um container novo sobe.
 - `Domain/Cpf.php` replica o value object `Document` da aplicação, e
@@ -177,8 +180,9 @@ entre elas é o `handler`. Assim, quem emite e quem valida o token rodam o mesmo
 entrada fixa contra uma string literal. A aplicação tem o teste espelho. Se ele quebrar,
 descubra o que mudou no `JwtProvider` e reverta. Não atualize a string sem mudar os dois lados.
 
-**Validar.** Veja a tabela de validação local mais abaixo. Os ARNs dos layers (Bref, New Relic)
-em `envs/*.tfvars` envelhecem: confira a versão antes de mudar.
+**Validar.** `bin/ws verify --repo gateway`. O `.terraform.lock.hcl` é versionado aqui: se
+mudar provider, atualize-o com `bin/ws exec gateway terraform init -backend=false` e commite. Os
+ARNs dos layers (Bref, New Relic) em `envs/*.tfvars` envelhecem: confira a versão antes de mudar.
 
 ### `oficina-api` — aplicação
 
@@ -260,7 +264,8 @@ O contrato HTTP completo está em `swagger.yaml`.
   repositório PDO precisa entrar ali também.
 - `src/Infrastructure/Database/schema.sql` é legado das fases anteriores e nada o referencia. O
   schema de verdade são as migrations do repo de banco.
-- Não há PHP na máquina: use `scripts/php.sh` ou `make` (docker compose).
+- Não há PHP na máquina: use `bin/ws verify --repo api` ou `bin/ws exec api <cmd>` (veja
+  "Validação local").
 
 ## Onde mexer para…
 
@@ -275,6 +280,7 @@ O contrato HTTP completo está em `swagger.yaml`.
 | escala, recursos ou réplicas | app (`deploy/overlays/<env>`) |
 | tamanho ou tipo de node, versão do EKS | infra-k8s (`envs/<env>.tfvars`) |
 | dashboards e alertas | app (`docs/fase-3/newrelic/`) |
+| conta AWS: bucket e lock do state, OIDC, roles de CI, role só-leitura do agente | este repo (`bootstrap/aws/`), aplicado à mão pelo usuário, nunca pelo agente |
 
 ## Como os repositórios se acoplam
 
@@ -296,30 +302,123 @@ Outros pontos de contato que quebram em silêncio se um lado mudar:
   `/swagger.yaml`) existem como rota dedicada no gateway (repo da Lambda) **e** na matriz de
   autorização da aplicação.
 
-`bin/check-contracts.py` confere o primeiro item automaticamente: parâmetro consumido sem dono,
-parâmetro com dois donos e parâmetro publicado que ninguém lê.
+`bin/check-contracts.py` confere todos esses pontos, e mais o `ClusterSecretStore`, o RBAC das
+CRDs da app, os placeholders do deploy, as migrations, os nomes antigos, as tags e o OIDC. Ele
+compara com o `CONTRATOS.md` e o `swagger.yaml` (o código fica em `tools/contratos/`, os testes em
+`tests/test_contratos.py`).
+
+- `erro`: as implementações discordam e algo quebra.
+- `aviso`: o documento está desatualizado.
+- `conhecido`: erro aceito, com motivo, em `tools/contratos/conhecidos.txt`. Não acrescente
+  linha ali sem o usuário decidir.
 
 ## Ferramentas do workspace
 
 ```bash
-make setup                 # baixa os repos que faltam em repos/
-bin/ws status              # branch, arquivos sujos e divergência de cada repo
-bin/ws pull                # fast-forward em todos
-bin/ws prs                 # PRs abertos em todos
+make setup                         # baixa os repos que faltam em repos/
+bin/ws status                      # branch, arquivos sujos e divergência de cada repo
+bin/ws context                     # o mesmo, mais PRs abertos e CI de develop, em 4 linhas
+bin/ws pull                        # fast-forward em todos
+bin/ws prs [--branch <b>]          # PRs abertos; com --branch, os PRs irmãos de uma mudança
+bin/ws ci [<branch>]               # último run de cada workflow; log do que falhou em .ws/ci/
+bin/ws diff [--patch]              # o que mudou contra origin/develop
+bin/ws grep -E 'padrão'            # busca nos quatro repos (só arquivos versionados ou novos)
+bin/ws verify [--changed] [--fast] # o que o pr.yml roda, local e sem AWS (ver "Validação local")
+bin/ws e2e                         # ponta a ponta entre os repos, sem AWS: migrations, app, Lambdas, JWT
+bin/ws exec <repo> <cmd...>        # comando na imagem de ferramentas (PHP, Composer, Terraform...)
+bin/ws branch <nome> <repo...>     # mesma branch nos repos indicados, a partir de origin/develop
+bin/ws isolate <b> <repo...>       # worktrees próprios desta sessão (sessões paralelas)
+bin/ws doctor                      # confere Docker, ferramentas, clones e proteções de branch
+bin/ws hooks install               # git hooks de convenção (commit-msg, pre-push) nos cinco repos
+bin/ws statusline                  # a linha da status line (branch de cada repo, último verify)
+bin/ws eval [list|setup|grade|clean] <n>   # tarefas-canário (evals/README.md)
 bin/ws run git log -3 --oneline
-bin/check-contracts.py     # acoplamento SSM consistente?
+bin/check-contracts.py [--json]    # os contratos entre os repos (SSM, JWT, rotas, segredos...)
 ```
+
+Onde um comando pede `<repo>`, vale o nome curto: `fundacao`, `cluster`, `gateway`, `api`.
+
+### Como buscar
+
+`repos/` é ignorado pelo Git deste repositório, e o ripgrep, que o Grep e o Glob usam, respeita
+isso. Os repos também podem ser symlinks, que ele não segue. Uma busca a partir da raiz **não
+encontra nada** dentro de `repos/`.
+
+- Use `bin/ws grep` para buscar nos quatro repos de uma vez.
+- No Grep ou Glob, passe sempre `path: repos/<nome>`, um repo por vez.
+- Nunca conclua que algo não existe a partir de uma busca na raiz.
+
+### Sessões em worktree
+
+O app desktop abre cada sessão num worktree em `.claude/worktrees/<nome>`, onde `repos/` não
+existe. O hook `SessionStart` (`.claude/hooks/ensure-repos.sh`) liga `repos/` ao do checkout
+principal, e `bin/ws` e `bin/check-contracts.py` fazem a mesma resolução sozinhos. Os clones são
+os mesmos do checkout principal: duas sessões abertas ao mesmo tempo mexem nos mesmos arquivos.
+Para isolar, use `bin/ws isolate <branch> <repo...>`.
+
+### Guardrails executados
+
+As regras para agentes, mais abaixo, não dependem só de você lembrar delas.
+
+- **`.claude/hooks/guard-bash.py`** (antes de todo Bash): analisa o comando inteiro, inclusive
+  `&&`, `bash -c`, `$(...)`, `git -C`, `cd x &&` e `bin/ws exec`.
+  - **Nega:** `apply`/`destroy`/`state`, `kubectl`/`helm`/`aws` que alteram algo, leitura de
+    segredo, `gh pr merge`, `gh workflow run`, `gh api` com escrita, force push, push em
+    `main`/`develop`, `--no-verify` e `Co-Authored-By`.
+  - **Pede confirmação:** push, `gh pr create`/`comment`, `reset --hard`, `clean -f`,
+    `restore`, `branch -D`, `stash drop`.
+  - Uma negação vem com o motivo. Não tente outra forma do mesmo comando: explique ao usuário.
+- **`.claude/hooks/guard-edit.py`**: nega edição em `.env`, tfstate, `vendor/`, `.terraform/`,
+  nas cópias aninhadas dos repos e no worktree de outra sessão.
+- **`.claude/hooks/after-edit.py`**: formata `.tf` com `terraform fmt`. Quando o arquivo toca um
+  contrato (migration, JWT, rotas, SSM, segredos, `deploy/`, nomes antigos, domínio,
+  `CONTRATOS.md`), lembra uma vez por sessão o que mais precisa mudar junto.
+- **`.claude/hooks/verify-on-stop.py`** (ao fim de cada resposta): se o estado dos repos mudou
+  desde o início da sessão e desde o último `verify` verde, roda `bin/ws verify --changed
+  --fast`. Vermelho devolve o trabalho para você uma vez. Corrija, ou diga ao usuário o que está
+  vermelho e por quê.
+- **`.claude/hooks/repo-context.py`**: na primeira vez que a sessão lê, busca ou edita algo em
+  `repos/<nome>/`, põe no contexto o `AGENTS.md` daquele repo, se ele existir.
+- **`.claude/hooks/session-start.py`**: liga `repos/` nos worktrees e põe o `bin/ws context` no
+  começo da sessão.
+- **`githooks/`** (`commit-msg` e `pre-push`, instalados com `bin/ws hooks install`): valem para
+  qualquer pessoa ou agente, no Git dos cinco repos.
+  - `commit-msg`: Conventional Commits com escopo, sem acento no assunto, sem `Co-Authored-By`.
+  - `pre-push`: bloqueia push em `main`/`develop` e roda `bin/ws verify --fast` do repo.
 
 ## Validação local
 
-Não há PHP nem Composer na máquina de desenvolvimento — PHP roda em Docker. Sem conta AWS, o
-teto de verificação dos repos de IaC é `fmt` + `validate` sem backend.
+Não há PHP, Composer, kubectl nem tflint na máquina de desenvolvimento: tudo roda na imagem
+`tooling/Dockerfile`, com as versões do CI. Sem conta AWS, o teto de verificação dos repos de
+IaC é `fmt` + `validate` sem backend.
 
-| Repo | Comandos |
-|---|---|
-| aplicação | `make up`, `make test`, `make analyse`, `make lint`, `make k8s-render` (ou `scripts/php.sh vendor/bin/phpunit`) |
-| lambda-auth | `make test`, `make stan`, `make fmt`, `make validate` |
-| infra-database, infra-k8s | `terraform fmt -check -recursive` e `terraform init -backend=false && terraform validate` |
+**Use `bin/ws verify`.** Ele roda, em paralelo e sem AWS, o mesmo que o `pr.yml` de cada repo:
+
+- **fundação:** `terraform fmt` e `validate`, checagem de SQL proibido e as migrations aplicadas
+  duas vezes num MySQL 8.0 com a conferência do seed;
+- **cluster:** `fmt`, `validate` e `tflint` (não bloqueante, como no CI);
+- **gateway:** composer, contrato do JWT, phpunit, phpstan, `fmt` e `validate`;
+- **aplicação:** composer, php-cs-fixer, phpstan, phpunit e `kustomize build` dos dois overlays,
+  e o build da imagem de produção com `--image`;
+- **workspace:** shellcheck, Python, os testes de `tests/` e `check-contracts`.
+
+O passo `workflows` (actionlint) confere a sintaxe dos workflows de todos os repos e bloqueia. Leva cerca de 30 s com tudo; `--changed` olha
+só os repos com mudança, e `--fast` pula as migrations. O resultado vai para
+`.ws/verify/latest.json` e os logs para `.ws/verify/logs/`.
+
+Em comando encadeado com pipe, use `set -o pipefail`: sem ele, `cmd | head && próximo` segue
+mesmo com `cmd` falhando.
+
+**`bin/ws e2e`** sobe um MySQL, aplica as migrations da fundação pelo runner da aplicação, sobe
+a aplicação e usa as Lambdas do gateway como classes para conferir o caminho inteiro: o token
+da `auth-cpf` aceito pela aplicação, o `jwt-authorizer`, a matriz de autorização e o webhook.
+Leva cerca de 30 s e usa a branch em disco de cada repo. Ele pega quebras entre repos que os
+testes de cada repo não pegam.
+
+Para um comando avulso, use `bin/ws exec <repo> <cmd>`, por exemplo
+`bin/ws exec gateway vendor/bin/phpunit --filter Jwt`. O `make test`/`make stan` do gateway
+chamam `vendor/bin/...` direto e **não funcionam** sem PHP local. O `make test` da aplicação usa
+o docker compose (`make up` antes) e o `make k8s-render` precisa de kubectl.
 
 ## Convenções (valem nos quatro repos)
 
@@ -334,6 +433,66 @@ teto de verificação dos repos de IaC é `fmt` + `validate` sem backend.
 - **Terraform**: ambientes em `envs/hml.tfvars` e `envs/prod.tfvars`, não em workspaces. Tags
   obrigatórias `Project`, `Environment`, `ManagedBy`, `Repo`.
 
+## Comandos
+
+O que o usuário digita no Claude Code, e o que acontece. As skills ficam em `.claude/skills/`.
+
+| Comando | Quando |
+|---|---|
+| `/status-geral` | "como está tudo": branch, sujeira, PRs e CI dos quatro repos, só o que pede ação |
+| `/verificar [repo]` | "isso está ok?": o que o CI roda, local e sem AWS, só com as falhas |
+| `/checar-contratos` | antes de PR de infra, depois de um pull, ou quando algo "funciona num repo e quebra no outro" |
+| `/mudanca-cross-repo <descrição>` | qualquer mudança que toca mais de um repo; começa em plan mode |
+| `/nova-migration <descrição>` | coluna, tabela ou índice novo |
+| `/novo-endpoint <descrição>` | rota nova na API (e no gateway, se for pública) |
+| `/mudar-jwt <descrição>` | claim, expiração ou validação do token |
+| `/novo-parametro-ssm <descrição>` | expor, renomear ou remover um valor entre repos |
+| `/novo-segredo <descrição>` | segredo ou chave de segredo nova |
+| `/corrigir-ci [branch ou link]` | "o CI quebrou" |
+| `/abrir-prs` | publicar uma mudança pronta: PRs draft, na ordem de apply, ligados entre si |
+| `/revisar-pr <repo> <número>` | revisar um PR (ou os irmãos dele) antes de mergear |
+| `/release` | preparar `develop` → `main` |
+| `/atualizar-dependencias [repo]` | Composer, providers, actions, layers e EKS desatualizados |
+| `/registrar-licao` | logo depois de corrigir o agente: a correção vira teste, checagem, hook ou regra |
+
+Comandos do próprio Claude Code que encaixam no fluxo:
+
+- **plan mode** (Shift+Tab): para mudança cross-repo;
+- `/code-review` e `/security-review`: antes de `/abrir-prs`;
+- `/simplify`: depois de uma mudança grande;
+- `/loop 5m /status-geral`: para acompanhar o CI dos PRs enquanto a sessão está aberta;
+- `/fewer-permission-prompts`: depois de umas semanas de uso, para liberar os comandos de
+  leitura que mais pedem confirmação.
+
+## Definição de Pronto
+
+Uma mudança só está pronta, e só sai em PR, quando:
+
+1. `bin/ws verify --changed` termina em `OK`. Use `--image` se mexeu em `Dockerfile` ou
+   `docker/` da app. Se a mudança atravessa repos (JWT, rotas, autenticação, migrations,
+   segredos), `bin/ws e2e` também termina sem falha.
+2. `bin/check-contracts.py` não tem `erro`. `aviso` novo de documento pede adendo no
+   `CONTRATOS.md`.
+3. O subagente `guardiao-de-contratos` não tem achado grave sobre o diff (`bin/ws diff --patch`).
+4. Se o contrato mudou, o `CONTRATOS.md` mudou no mesmo conjunto de PRs, como adendo.
+5. O usuário recebeu um resumo:
+   - o que mudou em cada repo e em que ordem fazer o merge;
+   - o que foi verificado aqui;
+   - o que só o CI consegue verificar (`terraform plan`, deploy, smoke).
+
+Os PRs saem com `/abrir-prs`, e só quando o usuário pedir.
+
+## Como evoluir este harness
+
+- **Correção do usuário vira prevenção** (`/registrar-licao`), nesta ordem de preferência: teste
+  > checagem em `tools/contratos/` > hook > `AGENTS.md` do repo > este `AGENTS.md` > memória.
+  Cada registro ganha uma linha em `docs/LICOES.md`.
+- **Mudou `AGENTS.md`, skill, hook ou checker?** Rode antes e depois as tarefas-canário afetadas
+  (`bin/ws eval`, `evals/README.md`). Se a nota piorar, a mudança volta.
+- **Tudo em `bin/`, `tools/`, `.claude/hooks/` e `githooks/` tem teste em `tests/`**, rodado
+  pelo `bin/ws verify --repo workspace`. O plano e o histórico das decisões estão em
+  `docs/PLANO-HARNESS-IA.md`.
+
 ## Regras para agentes
 
 1. **Nunca** rode `terraform apply`/`destroy`, `kubectl apply`/`delete` nem dispare
@@ -341,10 +500,15 @@ teto de verificação dos repos de IaC é `fmt` + `validate` sem backend.
 2. Mudança que atravessa repositórios segue a ordem de apply: o **produtor** do contrato muda e é
    mergeado antes do **consumidor**. Remoção é o contrário: primeiro o consumidor deixa de ler,
    depois o produtor deixa de publicar.
-3. Uma branch com o **mesmo nome** em cada repo afetado, e PRs que se referenciam.
-4. Antes de abrir PR de mudança cross-repo, rode `bin/check-contracts.py` e os testes de cada repo
-   tocado.
+3. Uma branch com o **mesmo nome** em cada repo afetado (`bin/ws branch`, ou `bin/ws isolate`
+   numa sessão em worktree), e PRs que se referenciam (`bin/ws prs --branch`).
+4. Antes de dar uma mudança por pronta, rode `bin/ws verify --changed`. Ele inclui o
+   `bin/check-contracts.py` e os testes de cada repo tocado, e precisa terminar em `OK`.
 5. Não commite nada dentro de `repos/` a partir de comandos do workspace sem conferir em qual repo
    e em qual branch está — cada um é um Git separado.
 6. Não leia nem imprima `.env` nem saída de `get-secret-value`. Os `envs/*.tfvars` são
    configuração versionada, sem segredo, e podem ser lidos.
+7. Na AWS, as sessões do Claude Code usam o perfil `oficina-readonly` (`AWS_PROFILE` no
+   `.claude/settings.json`; o role vem de `bootstrap/aws/`). Ele lê a conta, mas não lê segredo,
+   `kms:Decrypt` nem o bucket de state. Se precisar de mais, peça ao usuário; não troque de
+   perfil.

@@ -85,9 +85,15 @@ Fica no repositório da aplicação, em `docs/fase-3/`. Este repositório aponta
 git clone https://github.com/bregaldahq/oficina-mecanica.git
 cd oficina-mecanica
 make setup          # clona os quatro repositórios em repos/
-make status         # branch, arquivos sujos e divergência de cada um
+make doctor         # confere Docker, ferramentas, clones e proteções de branch
+make verify         # roda o que o CI de cada repo roda, local e sem AWS (~30 s)
+bin/ws hooks install  # git hooks de convenção (commit-msg, pre-push) nos cinco repos
 claude              # ou o agente de sua preferência, a partir da raiz
 ```
+
+A máquina só precisa de Docker, `git`, `gh` e `python3`. PHP, Composer, Terraform, tflint e
+kustomize vêm da imagem `tooling/Dockerfile`, nas versões do CI, construída na primeira vez que
+for usada.
 
 Já tem os repositórios clonados em outro lugar? Em vez de clonar de novo:
 
@@ -101,13 +107,22 @@ bin/ws link ~/caminho/onde/estao/os/clones
 |---|---|
 | `AGENTS.md` | contexto para qualquer agente: mapa, como cada repo funciona, acoplamento, convenções, regras |
 | `CLAUDE.md` | importa o `AGENTS.md` e lista o que é específico do Claude Code |
-| `Makefile` | atalhos: `make setup`, `make pull`, `make status`, `make prs`, `make contratos` |
+| `Makefile` | atalhos: `make setup`, `make pull`, `make status`, `make prs`, `make contratos`, `make verify`, `make doctor` |
 | `repos.txt` | lista de repositórios, na ordem de apply. Para incluir um repo, adicione uma linha |
-| `bin/ws` | `clone`, `link`, `pull`, `status`, `prs`, `run <cmd>` em todos os repos |
-| `bin/check-contracts.py` | confere o acoplamento por SSM: consumidor sem dono, dono duplicado, parâmetro órfão |
-| `.claude/skills/` | `status-geral`, `mudanca-cross-repo`, `checar-contratos` |
-| `.claude/agents/` | `guardiao-de-contratos`, revisor de diffs contra o `CONTRATOS.md` |
-| `.claude/settings.json` | libera comandos de leitura e bloqueia `apply`, `destroy`, deploy manual e leitura de segredos |
+| `bin/ws` | operações nos quatro repos: `clone`, `link`, `pull`, `status`, `context`, `prs`, `ci`, `diff`, `grep`, `verify`, `exec`, `branch`, `isolate`, `doctor`, `run` (`bin/ws` sem argumento lista tudo) |
+| `bin/verify.py` | o `bin/ws verify`: os passos do `pr.yml` de cada repo, em paralelo, com resultado em `.ws/verify/latest.json` |
+| `bin/tooling`, `tooling/Dockerfile` | imagem com PHP 8.2, Composer, Terraform 1.9.8, tflint, kustomize, actionlint e shellcheck |
+| `bin/check-contracts.py`, `tools/contratos/` | confere os contratos entre os repos (SSM, segredos, JWT, rotas, migrations, RBAC, nomes antigos) contra o código e o `CONTRATOS.md`; testes em `tests/` |
+| `.claude/skills/` | 15 comandos (`/verificar`, `/nova-migration`, `/abrir-prs`...); o catálogo está em "Comandos" no `AGENTS.md` |
+| `.claude/agents/` | `guardiao-de-contratos`, `revisor-ddd`, `revisor-terraform` e `verificador` |
+| `.claude/settings.json` | libera comandos de leitura, pede confirmação para push e operações git destrutivas, e bloqueia `apply`, `destroy`, `kubectl`/`helm`/`aws` mutantes, merge, deploy manual e leitura de segredos |
+| `.claude/hooks/` | guarda de Bash e de edição, lembretes de contrato, `verify` ao encerrar e retrato dos repos no início da sessão (`AGENTS.md`, "Guardrails executados") |
+| `githooks/` | `commit-msg` e `pre-push` para os cinco repos: `bin/ws hooks install` |
+| `tests/` | testes do checker, dos hooks e do contexto (`python3 -m unittest discover -s tests`) |
+| `evals/` | tarefas-canário com nota determinística, para medir mudanças no harness (`bin/ws eval`) |
+| `templates/pr-body.md` | corpo dos PRs abertos pelo `/abrir-prs` |
+| `bootstrap/aws/` | o que a conta AWS precisa antes de qualquer CI: bucket e lock do state, OIDC do GitHub, roles de CI e o role só-leitura do agente. Você aplica uma vez, à mão (ver o README dele) |
+| `docs/PLANO-HARNESS-IA.md` | plano de evolução do harness de IA |
 
 ## Princípios
 

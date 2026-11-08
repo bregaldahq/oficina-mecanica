@@ -1,23 +1,74 @@
 #!/usr/bin/env bash
 #
-# Operações em lote nos repositórios listados em repos.txt.
+# Operações em lote nos repositórios listados em repos.txt. Onde um comando pede <repo>, vale o
+# nome inteiro ou o curto: fundacao, cluster, gateway, api.
 #
 # Uso:
-#   bin/ws clone              clona o que falta em repos/
-#   bin/ws link <dir>         usa clones que já existem em <dir> (symlink), sem clonar de novo
-#   bin/ws pull               fast-forward da branch atual de cada repo
-#   bin/ws status             branch, sujeira e divergência com o remoto
-#   bin/ws prs                PRs abertos em cada repo
-#   bin/ws run <comando...>   executa o comando dentro de cada repo
+#   bin/ws clone                    clona o que falta em repos/
+#   bin/ws link <dir>               usa clones que já existem em <dir> (symlink), sem clonar de novo
+#   bin/ws pull                     fast-forward da branch atual de cada repo
+#   bin/ws status                   branch, sujeira e divergência com o remoto
+#   bin/ws context                  retrato curto: status + PRs abertos + CI de develop
+#   bin/ws prs [--branch <b>]       PRs abertos; com --branch, os PRs irmãos dessa branch
+#   bin/ws ci [<branch>]            último run de cada workflow; salva o log do que falhou
+#   bin/ws diff [--patch]           o que mudou contra origin/develop em cada repo
+#   bin/ws grep <padrão...>         git grep em todos os repos (só arquivos versionados ou novos)
+#   bin/ws verify [opções]          o que o pr.yml roda, local e sem AWS (bin/ws verify --help)
+#   bin/ws e2e [--keep]             ponta a ponta: MySQL + migrations + app + Lambdas, sem AWS
+#   bin/ws exec <repo> <cmd...>     roda o comando na imagem de ferramentas, dentro do repo
+#   bin/ws branch <nome> <repo...>  mesma branch nos repos indicados, a partir de origin/develop
+#   bin/ws isolate <b> <repo...>    worktrees próprios desta sessão para os repos indicados
+#   bin/ws isolate --rm             desfaz o isolate (as branches continuam)
+#   bin/ws doctor                   confere o ambiente: Docker, ferramentas, clones, proteções
+#   bin/ws hooks [install|uninstall] git hooks de githooks/ (commit-msg, pre-push) nos repos
+#   bin/ws statusline               uma linha para a status line do Claude Code (sem rede)
+#   bin/ws eval [list|setup|grade|clean] <n>  tarefas-canário de evals/ (ver evals/README.md)
+#   bin/ws run <comando...>         executa o comando dentro de cada repo
 #
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OWNER="${OFICINA_OWNER:-bregaldahq}"
-REPOS_DIR="$ROOT/repos"
+
+main_checkout() {
+  dirname "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)"
+}
+
+# Num worktree deste repo não existe repos/ (não é versionado): usa o do checkout principal.
+# OFICINA_REPOS_DIR força outro lugar.
+repos_dir() {
+  if [[ -n "${OFICINA_REPOS_DIR:-}" ]]; then echo "$OFICINA_REPOS_DIR"; return; fi
+  if [[ -e "$ROOT/repos" ]]; then echo "$ROOT/repos"; return; fi
+  local main
+  if main="$(main_checkout 2>/dev/null)"; then
+    echo "$main/repos"
+  else
+    echo "$ROOT/repos"
+  fi
+}
+REPOS_DIR="$(repos_dir)"
 
 repos() {
   grep -vE '^\s*(#|$)' "$ROOT/repos.txt" | awk '{print $1}'
+}
+
+# Nome inteiro ou uma parte dele (api, gateway, cluster, fundacao) -> nome do repo.
+resolve() {
+  local arg="$1" name found=""
+  for name in $(repos); do
+    if [[ "$name" == "$arg" || "-${name#oficina-}-" == *"-$arg-"* ]]; then
+      [[ -z "$found" ]] || { echo "repositório ambíguo: $arg" >&2; return 1; }
+      found="$name"
+    fi
+  done
+  [[ -n "$found" ]] || { echo "repositório desconhecido: $arg (veja repos.txt)" >&2; return 1; }
+  echo "$found"
+}
+
+short() {
+  local s="${1#oficina-}"
+  s="${s#infra-}"
+  echo "${s%%-*}"
 }
 
 each() {
@@ -81,11 +132,431 @@ status_one() {
   printf '%-34s %-40s sujos:%-3s +%-3s -%s\n' "$1" "$branch" "$dirty" "$ahead" "$behind"
 }
 
+# Os workflows com falha no último run de cada um, na branch dada.
+# gh 2.4 não tem `gh run list --branch`; a API REST tem.
+failing_workflows() {
+  gh api "repos/$OWNER/$1/actions/runs?branch=$2&per_page=20" \
+    --jq '.workflow_runs | group_by(.name) | map(max_by(.created_at)) | map(select(.conclusion == "failure") | .name) | join(",")'
+}
+
+context_one() {
+  local name="$1" dir="$REPOS_DIR/$1" branch dirty ahead behind sync prs ci
+  git -C "$dir" fetch --quiet 2>/dev/null || true
+  branch="$(git -C "$dir" branch --show-current)"
+  dirty="$(git -C "$dir" status --porcelain | wc -l | tr -d ' ')"
+  sync="sem upstream"
+  if git -C "$dir" rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1; then
+    read -r behind ahead < <(git -C "$dir" rev-list --left-right --count '@{u}...HEAD')
+    sync="+$ahead -$behind"
+  fi
+  prs="$(gh pr list --repo "$OWNER/$name" --state open --json number --jq 'map("#\(.number)") | join(" ")' 2>/dev/null || echo "?")"
+  ci="$(failing_workflows "$name" develop 2>/dev/null || echo "?")"
+  [[ -z "$ci" ]] && ci="verde" || ci="vermelho ($ci)"
+  printf '%-9s %-34s sujos:%-3s %-13s PRs: %-12s CI develop: %s\n' \
+    "$(short "$name")" "$branch" "$dirty" "$sync" "${prs:--}" "$ci"
+}
+
+cmd_context() {
+  local tmp name
+  tmp="$(mktemp -d)"
+  for name in $(repos); do
+    if [[ -d "$REPOS_DIR/$name" ]]; then
+      context_one "$name" > "$tmp/$name" &
+    else
+      echo "$(short "$name"): ausente (rode bin/ws clone)" > "$tmp/$name"
+    fi
+  done
+  wait
+  for name in $(repos); do cat "$tmp/$name"; done
+  rm -rf "$tmp"
+}
+
 prs_one() {
   echo "== $1"
   gh pr list --repo "$OWNER/$1" --state open \
     --json number,title,headRefName,baseRefName \
     --template '{{range .}}  #{{.number}} {{.headRefName}} -> {{.baseRefName}}  {{.title}}{{"\n"}}{{end}}'
+}
+
+prs_branch_one() {
+  local out
+  echo "== $1"
+  out="$(gh pr list --repo "$OWNER/$1" --head "$PRS_BRANCH" --state all \
+    --json number,state,baseRefName,url \
+    --template '{{range .}}  #{{.number}} {{.state}} -> {{.baseRefName}}  {{.url}}{{"\n"}}{{end}}')"
+  echo "${out:-  (nenhum)}"
+}
+
+cmd_prs() {
+  if [[ "${1:-}" == "--branch" ]]; then
+    PRS_BRANCH="${2:?uso: bin/ws prs --branch <branch>}"
+    echo "PRs da branch $PRS_BRANCH, na ordem de merge (a de apply):"
+    each prs_branch_one
+  else
+    each prs_one
+  fi
+}
+
+ci_one() {
+  local name="$1" dir="$REPOS_DIR/$1" branch runs id wf result url log
+  branch="${CI_BRANCH:-$(git -C "$dir" branch --show-current)}"
+  # Sem branch (HEAD destacado), a API devolveria runs de qualquer branch.
+  [[ -n "$branch" ]] || { echo "== $name: HEAD destacado; passe a branch (bin/ws ci <branch>)"; return; }
+  echo "== $name @ $branch"
+  runs="$(gh api "repos/$OWNER/$name/actions/runs?branch=$branch&per_page=20" \
+    --jq '.workflow_runs | group_by(.name) | map(max_by(.created_at)) | .[] | [.id, .name, (.conclusion // .status), .html_url] | @tsv')" || runs=""
+  [[ -n "$runs" ]] || { echo "   nenhum run"; return; }
+  while IFS=$'\t' read -r id wf result url; do
+    printf '   %-10s %-12s %s\n' "$wf" "$result" "$url"
+    if [[ "$result" == failure ]]; then
+      mkdir -p "$ROOT/.ws/ci"
+      log="$ROOT/.ws/ci/$name-$(echo "$branch-$wf" | tr '[:upper:] /' '[:lower:]--').log"
+      gh run view "$id" --repo "$OWNER/$name" --log-failed > "$log" 2>&1 || true
+      echo "   log das etapas que falharam: ${log#"$ROOT"/}"
+    fi
+  done <<< "$runs"
+}
+
+# Numa branch de trabalho: commits contra origin/develop + o que não foi commitado. Em main ou
+# develop, só o que não foi commitado.
+diff_one() {
+  local dir="$REPOS_DIR/$1" branch committed="" pending
+  branch="$(git -C "$dir" branch --show-current)"
+  pending="$(git -C "$dir" status --short)"
+  if [[ "$branch" != main && "$branch" != develop ]] && git -C "$dir" rev-parse -q --verify origin/develop >/dev/null; then
+    committed="$(git -C "$dir" --no-pager diff --stat origin/develop...HEAD)"
+  fi
+  [[ -n "$committed$pending" ]] || return 0
+  DIFF_ANY=1
+  echo "== $1 ($branch)"
+  if [[ "$DIFF_PATCH" == 1 ]]; then
+    [[ -z "$committed" ]] || git -C "$dir" --no-pager diff origin/develop...HEAD
+    git -C "$dir" --no-pager diff HEAD
+  else
+    [[ -z "$committed" ]] || echo "$committed"
+    [[ -z "$pending" ]] || echo "$pending"
+  fi
+}
+
+cmd_diff() {
+  DIFF_PATCH=0; DIFF_ANY=0
+  [[ "${1:-}" == "--patch" ]] && DIFF_PATCH=1
+  each diff_one
+  [[ "$DIFF_ANY" == 1 ]] || echo "nenhum repo com mudanças (todos em main/develop e limpos)"
+}
+
+cmd_exec() {
+  local name
+  name="$(resolve "${1:?uso: bin/ws exec <repo> <comando...>}")"; shift
+  [[ $# -gt 0 ]] || { echo "uso: bin/ws exec <repo> <comando...>"; exit 1; }
+  exec "$ROOT/bin/tooling" run "$REPOS_DIR/$name" "$@"
+}
+
+# Cria <branch> a partir de origin/develop, ou passa a usá-la se já existir (local ou remota).
+cmd_branch() {
+  local branch="${1:?uso: bin/ws branch <nome> <repo...>}" names=() arg name dir; shift
+  [[ $# -gt 0 ]] || { echo "diga em quais repos (ex.: bin/ws branch $branch fundacao api)"; exit 1; }
+  for arg in "$@"; do names+=("$(resolve "$arg")"); done
+  for name in "${names[@]}"; do
+    if [[ -n "$(git -C "$REPOS_DIR/$name" status --porcelain --untracked-files=no)" ]]; then
+      echo "== $name tem mudanças não commitadas; nenhum repo foi trocado de branch."
+      exit 1
+    fi
+  done
+  for name in "${names[@]}"; do
+    dir="$REPOS_DIR/$name"
+    git -C "$dir" fetch --quiet origin
+    if git -C "$dir" rev-parse --verify -q "refs/heads/$branch" >/dev/null; then
+      git -C "$dir" switch --quiet "$branch"
+    elif git -C "$dir" rev-parse --verify -q "refs/remotes/origin/$branch" >/dev/null; then
+      git -C "$dir" switch --quiet --track "origin/$branch"
+    else
+      git -C "$dir" switch --quiet --no-track -c "$branch" origin/develop
+    fi
+    echo "== $name: $(git -C "$dir" branch --show-current)"
+  done
+}
+
+# Troca o repos/ compartilhado desta sessão (symlink para o checkout principal) por um diretório
+# com worktrees próprios dos repos indicados, todos na mesma branch. Os outros repos continuam
+# apontando para os clones do checkout principal.
+cmd_isolate() {
+  local main
+  main="$(main_checkout)"
+  [[ "$main" != "$ROOT" ]] || { echo "ws isolate só serve numa sessão em worktree (.claude/worktrees/...)."; exit 1; }
+  if [[ "${1:-}" == "--rm" ]]; then isolate_rm "$main/repos"; return; fi
+
+  local branch="${1:?uso: bin/ws isolate <branch> <repo...> | bin/ws isolate --rm}" targets=() arg name; shift
+  [[ $# -gt 0 ]] || { echo "diga quais repos (ex.: bin/ws isolate $branch api gateway)"; exit 1; }
+  for arg in "$@"; do targets+=("$(resolve "$arg")"); done
+
+  [[ -L "$ROOT/repos" ]] && rm "$ROOT/repos"
+  mkdir -p "$ROOT/repos"
+  for name in $(repos); do
+    [[ -e "$ROOT/repos/$name" ]] || ln -s "$main/repos/$name" "$ROOT/repos/$name"
+  done
+  for name in "${targets[@]}"; do
+    isolate_one "$main/repos/$name" "$ROOT/repos/$name" "$branch"
+  done
+}
+
+isolate_one() {
+  local src="$1" dst="$2" branch="$3" name
+  name="$(basename "$dst")"
+  if [[ -f "$dst/.git" ]]; then
+    echo "== $name: já isolado, na branch $(git -C "$dst" branch --show-current)"
+    return
+  fi
+  rm "$dst"
+  git -C "$src" fetch --quiet origin
+  local add=(worktree add --quiet "$dst" "$branch")
+  if ! git -C "$src" rev-parse --verify -q "refs/heads/$branch" >/dev/null; then
+    if git -C "$src" rev-parse --verify -q "refs/remotes/origin/$branch" >/dev/null; then
+      add=(worktree add --quiet --track -b "$branch" "$dst" "origin/$branch")
+    else
+      add=(worktree add --quiet --no-track -b "$branch" "$dst" origin/develop)
+    fi
+  fi
+  if git -C "$src" "${add[@]}"; then
+    echo "== $name: repos/$name é um worktree próprio, na branch $branch"
+  else
+    ln -s "$src" "$dst"
+    echo "== $name: não foi possível isolar (a branch está em uso em outro worktree?); segue compartilhado"
+  fi
+}
+
+isolate_rm() {
+  local main_repos="$1" name dst
+  if [[ -L "$ROOT/repos" || ! -d "$ROOT/repos" ]]; then
+    echo "nada a desfazer: repos/ não está isolado"
+    return
+  fi
+  for name in $(repos); do
+    dst="$ROOT/repos/$name"
+    if [[ -f "$dst/.git" && -n "$(git -C "$dst" status --porcelain)" ]]; then
+      echo "== $name tem mudanças não commitadas; commite ou descarte antes. Nada foi desfeito."
+      exit 1
+    fi
+  done
+  for name in $(repos); do
+    dst="$ROOT/repos/$name"
+    if [[ -f "$dst/.git" ]]; then
+      git -C "$main_repos/$name" worktree remove "$dst"
+      echo "== $name: worktree removido (a branch continua no clone principal)"
+    elif [[ -L "$dst" ]]; then
+      rm "$dst"
+    fi
+  done
+  rmdir "$ROOT/repos"
+  ln -s "$main_repos" "$ROOT/repos"
+}
+
+doctor_line() {
+  printf '%-6s %s\n' "$1" "$2"
+  [[ "$1" != erro ]] || DOCTOR_ERRORS=$((DOCTOR_ERRORS + 1))
+}
+
+cmd_doctor() {
+  DOCTOR_ERRORS=0
+  local want have name dir real wts unpushed prot branch weak
+
+  if docker info >/dev/null 2>&1; then doctor_line ok "Docker rodando"
+  else doctor_line erro "Docker não está rodando: bin/ws verify e bin/ws exec dependem dele"; fi
+
+  if docker image inspect "$("$ROOT/bin/tooling" tag)" >/dev/null 2>&1; then
+    doctor_line ok "imagem $("$ROOT/bin/tooling" tag) construída"
+  else
+    doctor_line aviso "imagem de ferramentas ainda não construída: bin/tooling image (cerca de 1 min)"
+  fi
+
+  want="$(sed -n 's/^ARG TERRAFORM_VERSION=//p' "$ROOT/tooling/Dockerfile")"
+  if have="$(terraform version 2>/dev/null | sed -n '1s/^Terraform v//p')" && [[ -n "$have" ]]; then
+    if [[ "$have" == "$want" ]]; then doctor_line ok "terraform local $have, igual ao do CI"
+    else doctor_line aviso "terraform local $have, CI usa $want (use bin/ws exec <repo> terraform ...)"; fi
+  fi
+
+  have="$(gh --version 2>/dev/null | sed -n '1s/^gh version \([0-9.]*\).*/\1/p')"
+  if [[ -z "$have" ]]; then
+    doctor_line erro "gh não instalado"
+  elif [[ "$(printf '%s\n2.60.0\n' "$have" | sort -V | head -1)" != 2.60.0 ]]; then
+    doctor_line aviso "gh $have é antigo (sem 'gh run list --branch'); bin/ws ci contorna pela API, mas vale atualizar"
+  else
+    doctor_line ok "gh $have"
+  fi
+
+  for name in $(repos); do
+    dir="$REPOS_DIR/$name"
+    if [[ ! -d "$dir" ]]; then doctor_line erro "$name ausente em repos/ (bin/ws clone)"; continue; fi
+    real="$(cd "$dir" && pwd -P)"
+    if [[ -L "$dir" ]]; then
+      doctor_line aviso "$name é symlink para $real: a busca a partir da raiz não entra nele"
+    fi
+    if [[ "$real" =~ oficina-(infra-database|infra-k8s|lambda-auth|mecanica-tech-challenge)/repos/ ]]; then
+      doctor_line aviso "$name é um clone aninhado, com nome antigo no caminho ($real)"
+    fi
+    wts="$(git -C "$dir" worktree list --porcelain | grep -c '^worktree ' || true)"
+    if (( wts > 1 )); then
+      doctor_line aviso "$name tem $((wts - 1)) worktree(s) além do principal (git -C $dir worktree list)"
+    fi
+    unpushed="$(git -C "$dir" log --branches --not --remotes --oneline | wc -l | tr -d ' ')"
+    if (( unpushed > 0 )); then
+      doctor_line aviso "$name tem $unpushed commit(s) que não estão em nenhum remoto (git -C $dir log --branches --not --remotes)"
+    fi
+    weak=()
+    for branch in main develop; do
+      prot="$(gh api "repos/$OWNER/$name/branches/$branch/protection" \
+        --jq '"\(.enforce_admins.enabled) \(.required_status_checks.contexts // [] | length)"' 2>/dev/null || echo "?")"
+      [[ "$prot" =~ ^true\ [1-9] ]] || weak+=("$branch")
+    done
+    if (( ${#weak[@]} == 0 )); then
+      doctor_line ok "$name: main e develop com enforce_admins e checks obrigatórios"
+    else
+      doctor_line aviso "$name: ${weak[*]} sem enforce_admins ou sem checks obrigatórios (decisão 4 do plano)"
+    fi
+  done
+
+  local hooks_missing=0
+  for dir in "$(main_checkout)" $(for n in $(repos); do echo "$REPOS_DIR/$n"; done); do
+    [[ -d "$dir" && "$(git -C "$dir" config --get core.hooksPath || true)" == "$(main_checkout)/githooks" ]] || hooks_missing=1
+  done
+  if (( hooks_missing )); then doctor_line aviso "git hooks (commit-msg, pre-push) não instalados em todos os repos: bin/ws hooks install"
+  else doctor_line ok "git hooks instalados nos cinco repos"; fi
+
+  if aws configure list-profiles 2>/dev/null | grep -qx oficina-readonly; then
+    doctor_line ok "perfil AWS oficina-readonly existe"
+  else
+    doctor_line aviso "perfil AWS oficina-readonly não existe (decisão 5 do plano)"
+  fi
+
+  echo
+  if (( DOCTOR_ERRORS > 0 )); then echo "$DOCTOR_ERRORS erro(s)"; exit 1; fi
+  echo "sem erros"
+}
+
+# Aponta o core.hooksPath deste repo e dos quatro para githooks/ do checkout principal (um worktree
+# pode sumir; o checkout principal fica). Não mexe em repo que já usa outro hooksPath.
+cmd_hooks() {
+  local action="${1:-status}" hooks dir current
+  hooks="$(main_checkout)/githooks"
+  if [[ "$action" == install && ! -d "$hooks" ]]; then
+    echo "$hooks não existe: os git hooks precisam estar no checkout principal (faça o merge antes)."
+    exit 1
+  fi
+  for dir in "$(main_checkout)" $(for n in $(repos); do echo "$REPOS_DIR/$n"; done); do
+    [[ -d "$dir" ]] || continue
+    current="$(git -C "$dir" config --get core.hooksPath || true)"
+    case "$action" in
+      install)
+        if [[ -n "$current" && "$current" != "$hooks" ]]; then
+          echo "== $(basename "$dir"): já usa core.hooksPath=$current; não mexi"
+        else
+          git -C "$dir" config core.hooksPath "$hooks"
+          echo "== $(basename "$dir"): git hooks instalados"
+        fi
+        ;;
+      uninstall)
+        if [[ "$current" == "$hooks" ]]; then
+          git -C "$dir" config --unset core.hooksPath
+          echo "== $(basename "$dir"): git hooks removidos"
+        fi
+        ;;
+      *) printf '%-34s %s\n' "$(basename "$dir")" "${current:-(sem core.hooksPath)}" ;;
+    esac
+  done
+}
+
+# Branch de cada repo (* = mudança não commitada) e o último bin/ws verify. Sem rede: roda a
+# cada atualização da status line.
+cmd_statusline() {
+  [[ -t 0 ]] || cat > /dev/null  # o Claude Code manda o JSON da sessão; não precisamos dele
+  local parts=() name dir branch mark latest result age
+  for name in $(repos); do
+    dir="$REPOS_DIR/$name"
+    [[ -d "$dir" ]] || continue
+    branch="$(git -C "$dir" branch --show-current 2>/dev/null)"
+    branch="${branch:-HEAD}"
+    (( ${#branch} > 24 )) && branch="${branch:0:23}…"
+    mark=""
+    [[ -n "$(git -C "$dir" status --porcelain --untracked-files=no 2>/dev/null)" ]] && mark="*"
+    parts+=("$(short "$name"):$branch$mark")
+  done
+  latest="$ROOT/.ws/verify/latest.json"
+  if [[ -f "$latest" ]]; then
+    grep -q '"ok": true' "$latest" && result="verify ✓" || result="verify ✗"
+    age=$(( ($(date +%s) - $(stat -c %Y "$latest")) / 60 ))
+    if (( age < 60 )); then result+=" ${age}min"; else result+=" $(( age / 60 ))h"; fi
+  else
+    result="verify -"
+  fi
+  echo "${parts[*]} │ $result"
+}
+
+# Tarefas-canário (evals/README.md). setup isola os repos da tarefa na branch eval/<tarefa> e
+# planta o defeito; grade dá a nota; clean apaga worktrees e branch, mesmo com mudanças, porque
+# são descartáveis.
+cmd_eval() {
+  local action="${1:-list}" arg dir slug main name rc
+  if [[ "$action" == list ]]; then
+    for dir in "$ROOT"/evals/[0-9]*/; do
+      printf '%-26s %s\n' "$(basename "$dir")" "$(head -1 "$dir/task.md" | sed 's/^# //')"
+    done
+    return
+  fi
+  arg="${2:?uso: bin/ws eval $action <número>}"
+  [[ "$arg" =~ ^[0-9]$ ]] && arg="0$arg"
+  dir="$(compgen -G "$ROOT/evals/$arg*" | head -1 || true)"
+  [[ -n "$dir" && -f "$dir/task.md" ]] || { echo "tarefa não encontrada: $arg (bin/ws eval list)"; exit 1; }
+  slug="$(basename "$dir")"
+  main="$(main_checkout)"
+  mkdir -p "$ROOT/.ws/evals"
+  # shellcheck disable=SC2046
+  set -- $(cat "$dir/repos")
+  case "$action" in
+    setup)
+      cmd_isolate "eval/$slug" "$@"
+      if [[ -x "$dir/setup.sh" ]]; then
+        REPOS="$ROOT/repos" WS="$ROOT" "$dir/setup.sh"
+      fi
+      date +%s > "$ROOT/.ws/evals/$slug.inicio"
+      echo
+      echo "Pronto. Rode /clear e cole o pedido abaixo; depois, bin/ws eval grade $arg."
+      echo "────────────────────────────────────────"
+      tail -n +3 "$dir/task.md"
+      ;;
+    grade)
+      rc=0
+      REPOS="$ROOT/repos" WS="$ROOT" SINCE="$(cat "$ROOT/.ws/evals/$slug.inicio" 2>/dev/null || echo 0)" \
+        bash "$dir/grade.sh" | tee "$ROOT/.ws/evals/$slug.nota" || rc=$?
+      printf '{"data": "%s", "tarefa": "%s", "ok": %s, "nota": "%s"}\n' "$(date -Iseconds)" "$slug" \
+        "$([[ $rc == 0 ]] && echo true || echo false)" "$(tail -1 "$ROOT/.ws/evals/$slug.nota")" \
+        >> "$ROOT/.ws/evals/resultados.jsonl"
+      return "$rc"
+      ;;
+    clean)
+      for name in "$@"; do
+        name="$(resolve "$name")"
+        if [[ -f "$ROOT/repos/$name/.git" ]] && [[ "$(git -C "$ROOT/repos/$name" branch --show-current)" == "eval/$slug" ]]; then
+          git -C "$main/repos/$name" worktree remove --force "$ROOT/repos/$name"
+          ln -s "$main/repos/$name" "$ROOT/repos/$name"
+        fi
+        git -C "$main/repos/$name" branch -q -D "eval/$slug" 2>/dev/null || true
+        echo "== $name: eval/$slug apagada"
+      done
+      # Sem nenhum worktree isolado (o .git deles é arquivo; o dos clones é diretório), repos/
+      # volta a ser um symlink só.
+      if [[ -d "$ROOT/repos" && ! -L "$ROOT/repos" ]]; then
+        local isolated=0
+        for name in $(repos); do [[ -f "$ROOT/repos/$name/.git" ]] && isolated=1; done
+        if (( ! isolated )); then
+          rm -f "$ROOT"/repos/*
+          rmdir "$ROOT/repos"
+          ln -s "$main/repos" "$ROOT/repos"
+        fi
+      fi
+      rm -f "$ROOT/.ws/evals/$slug.inicio"
+      ;;
+    *) echo "uso: bin/ws eval [list|setup|grade|clean] <número>"; exit 1 ;;
+  esac
 }
 
 run_one() {
@@ -94,12 +565,35 @@ run_one() {
   (cd "$REPOS_DIR/$name" && "$@") || echo "   (saiu com erro)"
 }
 
+# git grep, e não rg: só olha o que o repo versiona (mais os arquivos novos), então ignora
+# vendor/, .terraform/, clones aninhados e worktrees velhos sem precisar de filtro.
+cmd_grep() {
+  [[ $# -gt 0 ]] || { echo "uso: bin/ws grep <padrão> [opções do git grep]"; exit 1; }
+  for name in $(repos); do
+    [[ -d "$REPOS_DIR/$name" ]] || continue
+    git -C "$REPOS_DIR/$name" grep --untracked -n -I "$@" | sed "s#^#repos/$name/#" || true
+  done
+}
+
 case "${1:-}" in
-  clone)  cmd_clone ;;
-  link)   shift; cmd_link "$@" ;;
-  pull)   each pull_one ;;
-  status) each status_one ;;
-  prs)    each prs_one ;;
+  clone)   cmd_clone ;;
+  link)    shift; cmd_link "$@" ;;
+  pull)    each pull_one ;;
+  status)  each status_one ;;
+  context) cmd_context ;;
+  prs)     shift; cmd_prs "$@" ;;
+  ci)      shift; CI_BRANCH="${1:-}"; each ci_one ;;
+  diff)    shift; cmd_diff "$@" ;;
+  grep)    shift; cmd_grep "$@" ;;
+  verify)  shift; exec python3 "$ROOT/bin/verify.py" "$@" ;;
+  e2e)     shift; exec python3 "$ROOT/bin/e2e.py" "$@" ;;
+  exec)    shift; cmd_exec "$@" ;;
+  branch)  shift; cmd_branch "$@" ;;
+  isolate) shift; cmd_isolate "$@" ;;
+  doctor)  cmd_doctor ;;
+  hooks)   shift; cmd_hooks "$@" ;;
+  statusline) cmd_statusline ;;
+  eval)    shift; cmd_eval "$@" ;;
   run)
     shift
     [[ $# -gt 0 ]] || { echo "uso: bin/ws run <comando...>"; exit 1; }
@@ -108,7 +602,7 @@ case "${1:-}" in
     done
     ;;
   *)
-    sed -n '3,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    awk 'NR > 2 && /^#/ { sub(/^# ?/, ""); print; next } NR > 2 { exit }' "${BASH_SOURCE[0]}"
     exit 1
     ;;
 esac

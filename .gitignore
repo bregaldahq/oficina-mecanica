@@ -1,7 +1,16 @@
-# Os repositórios ficam aqui, cada um com o próprio Git.
-repos/
+# Os repositórios ficam aqui, cada um com o próprio Git. Sem a barra no fim para ignorar
+# também o symlink que o hook ensure-repos.sh cria nos worktrees.
+/repos
+
+# Resultados e logs de bin/ws verify e bin/ws ci
+.ws/
 
 # Configuração pessoal do Claude Code
 .claude/settings.local.json
 
 __pycache__/
+
+# bootstrap/aws: state local (guarde-o fora do Git) e cache do terraform init
+bootstrap/aws/.terraform/
+bootstrap/aws/terraform.tfstate*
+bootstrap/aws/*.tfvars
