@@ -15,7 +15,8 @@ Uso: bin/ws verify [--repo NOME]... [--changed] [--fast] [--image] [--json]
   --json       imprime o resultado em JSON
 
 O resultado também vai para .ws/verify/latest.json, e o log de cada passo para
-.ws/verify/logs/<repo>-<passo>.log. Sai com 1 se algum passo bloqueante falhar. Passo não
+.ws/verify/logs/<repo>-<passo>.log. Sem --repo, um OK grava em .ws/verify/ok-fingerprint o estado
+aprovado, que o hook Stop usa para não verificar duas vezes a mesma coisa. Sai com 1 se algum passo bloqueante falhar. Passo não
 bloqueante (o tflint, que no CI tem continue-on-error, e o actionlint, que não está no CI) só
 gera aviso.
 """
@@ -33,7 +34,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, TextIO
 
-from wslib import ROOT, repo_names, repos_dir, resolve_repo
+from wslib import ROOT, fingerprint, repo_names, repos_dir, resolve_repo
 
 TOOLING = ROOT / "bin" / "tooling"
 OUT = ROOT / ".ws" / "verify"
@@ -135,7 +136,8 @@ def app_image(repo: Path, log: TextIO) -> bool:
 
 
 def python_compiles(repo: Path, log: TextIO) -> bool:
-    files = sorted([*repo.glob("bin/*.py"), *repo.glob("tools/**/*.py"), *repo.glob("tests/*.py")])
+    files = sorted([*repo.glob("bin/*.py"), *repo.glob("tools/**/*.py"), *repo.glob("tests/*.py"),
+                    *repo.glob(".claude/hooks/*.py")])
     return sh([sys.executable, "-m", "py_compile", *map(str, files)], log)
 
 
@@ -184,7 +186,7 @@ STEPS: dict[str, list[Step]] = {
         Step("actionlint", ACTIONLINT, "fora do CI", blocking=False),
     ],
     WORKSPACE: [
-        Step("shellcheck", tool("shellcheck bin/ws bin/tooling .claude/hooks/*.sh"), "-"),
+        Step("shellcheck", tool("shellcheck bin/ws bin/tooling .claude/hooks/*.sh githooks/*"), "-"),
         Step("python", python_compiles, "-"),
         Step("testes", unittests, "tests/ (checker de contratos)"),
         Step("contratos", contracts, "bin/check-contracts.py"),
@@ -289,6 +291,7 @@ def main() -> int:
 
     (OUT / "logs").mkdir(parents=True, exist_ok=True)
     started = datetime.now().astimezone()
+    state = fingerprint()
     with ThreadPoolExecutor(max_workers=len(selected)) as pool:
         results = list(pool.map(lambda n: run_repo(n, paths[n], args, out), selected))
 
@@ -303,6 +306,10 @@ def main() -> int:
         "repos": results,
     }
     (OUT / "latest.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+    # O hook Stop não roda o verify de novo sobre um estado já aprovado. Com --repo, só uma
+    # parte foi verificada, então não vale.
+    if ok and not args.repo:
+        (OUT / "ok-fingerprint").write_text(state + "\n")
 
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))

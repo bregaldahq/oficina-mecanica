@@ -19,6 +19,7 @@
 #   bin/ws isolate <b> <repo...>    worktrees próprios desta sessão para os repos indicados
 #   bin/ws isolate --rm             desfaz o isolate (as branches continuam)
 #   bin/ws doctor                   confere o ambiente: Docker, ferramentas, clones, proteções
+#   bin/ws hooks [install|uninstall] git hooks de githooks/ (commit-msg, pre-push) nos repos
 #   bin/ws run <comando...>         executa o comando dentro de cada repo
 #
 set -euo pipefail
@@ -411,6 +412,13 @@ cmd_doctor() {
     fi
   done
 
+  local hooks_missing=0
+  for dir in "$(main_checkout)" $(for n in $(repos); do echo "$REPOS_DIR/$n"; done); do
+    [[ -d "$dir" && "$(git -C "$dir" config --get core.hooksPath || true)" == "$(main_checkout)/githooks" ]] || hooks_missing=1
+  done
+  if (( hooks_missing )); then doctor_line aviso "git hooks (commit-msg, pre-push) não instalados em todos os repos: bin/ws hooks install"
+  else doctor_line ok "git hooks instalados nos cinco repos"; fi
+
   if aws configure list-profiles 2>/dev/null | grep -qx oficina-readonly; then
     doctor_line ok "perfil AWS oficina-readonly existe"
   else
@@ -420,6 +428,38 @@ cmd_doctor() {
   echo
   if (( DOCTOR_ERRORS > 0 )); then echo "$DOCTOR_ERRORS erro(s)"; exit 1; fi
   echo "sem erros"
+}
+
+# Aponta o core.hooksPath deste repo e dos quatro para githooks/ do checkout principal (um worktree
+# pode sumir; o checkout principal fica). Não mexe em repo que já usa outro hooksPath.
+cmd_hooks() {
+  local action="${1:-status}" hooks dir current
+  hooks="$(main_checkout)/githooks"
+  if [[ "$action" == install && ! -d "$hooks" ]]; then
+    echo "$hooks não existe: os git hooks precisam estar no checkout principal (faça o merge antes)."
+    exit 1
+  fi
+  for dir in "$(main_checkout)" $(for n in $(repos); do echo "$REPOS_DIR/$n"; done); do
+    [[ -d "$dir" ]] || continue
+    current="$(git -C "$dir" config --get core.hooksPath || true)"
+    case "$action" in
+      install)
+        if [[ -n "$current" && "$current" != "$hooks" ]]; then
+          echo "== $(basename "$dir"): já usa core.hooksPath=$current; não mexi"
+        else
+          git -C "$dir" config core.hooksPath "$hooks"
+          echo "== $(basename "$dir"): git hooks instalados"
+        fi
+        ;;
+      uninstall)
+        if [[ "$current" == "$hooks" ]]; then
+          git -C "$dir" config --unset core.hooksPath
+          echo "== $(basename "$dir"): git hooks removidos"
+        fi
+        ;;
+      *) printf '%-34s %s\n' "$(basename "$dir")" "${current:-(sem core.hooksPath)}" ;;
+    esac
+  done
 }
 
 run_one() {
@@ -453,6 +493,7 @@ case "${1:-}" in
   branch)  shift; cmd_branch "$@" ;;
   isolate) shift; cmd_isolate "$@" ;;
   doctor)  cmd_doctor ;;
+  hooks)   shift; cmd_hooks "$@" ;;
   run)
     shift
     [[ $# -gt 0 ]] || { echo "uso: bin/ws run <comando...>"; exit 1; }

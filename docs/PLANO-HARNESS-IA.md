@@ -31,7 +31,7 @@ qualquer sessão (**corrigido**, ver o Andamento), conseguir **verificar** o que
 | 0 | Consertar a base | sem isso, todo o resto roda às cegas | ½ dia (metade feita) |
 | 1 | Verificação local num comando | autonomia sem verificação é aposta | ✅ no workspace; PRs nos repos pendentes |
 | 2 | Checagem de contrato completa | o maior risco do sistema está *entre* os repos | ✅ |
-| 3 | Hooks e guardrails | regra escrita vira regra executada; toda sessão termina verificada | 1 dia |
+| 3 | Hooks e guardrails | regra escrita vira regra executada; toda sessão termina verificada | ✅ |
 | 4 | Contexto em camadas | contexto certo, na hora certa, mais barato | 1 dia |
 | 5 | Comandos: skills e subagentes | cada mudança típica vira um comando seu | 2–3 dias |
 | 6 | A sessão interativa | menos interrupção, status visível, sessões paralelas | ½ dia |
@@ -48,6 +48,7 @@ qualquer sessão (**corrigido**, ver o Andamento), conseguir **verificar** o que
 | 2026-11-07 | 2 (texto) | `AGENTS.md` deixou de dizer que o `JwtProvider` é "cópia byte a byte": o que é idêntico é o token. |
 | 2026-11-07 | 1 Verificação local | `tooling/Dockerfile` + `bin/tooling`: imagem com PHP 8.2, Composer 2.7, Terraform 1.9.8, tflint, kustomize 5.4.3, actionlint e shellcheck. `bin/ws verify` (`bin/verify.py`): os passos do `pr.yml` dos 4 repos em paralelo, incluindo as migrations duas vezes num MySQL 8.0, em **~25 s**, com `.ws/verify/latest.json`. Também `bin/ws exec`, `context`, `ci`, `diff`, `prs --branch`, `branch`, `isolate` e `doctor`. Testado: tudo verde nos 4 repos; defeito plantado (`terraform fmt`) vira vermelho com o diff; `isolate`/`--rm` ida e volta; nenhum arquivo dos repos fica alterado. |
 | 2026-11-07 | 2 Contratos | `bin/check-contracts.py` virou CLI de `tools/contratos/`: 8 famílias (ssm, jwt, rotas, segredos, k8s, migrations, nomes, docs) e 18 checagens, com `--json` e `--only`. Erros conhecidos e aceitos ficam em `tools/contratos/conhecidos.txt`, com motivo. São 33 testes com fixtures em `tests/test_contratos.py`, e desligar qualquer família faz de 3 a 6 testes falharem. Rodando nos repos reais, achou: o webhook de aprovação inalcançável pelo gateway (achado 19, registrado como conhecido), o §5 do `CONTRATOS.md` desatualizado (achado 20) e a versão do Terraform diferente no gateway (achado 12). Skill `checar-contratos` e subagente `guardiao-de-contratos` passaram a partir do `--json`; os testes entraram no `bin/ws verify`. |
+| 2026-11-07 | 3 Hooks e guardrails | Os hooks ficaram em Python, em `.claude/hooks/`: `guard-bash.py` (PreToolUse Bash), `guard-edit.py` (PreToolUse Edit/Write), `after-edit.py` (PostToolUse: `terraform fmt` e lembretes de contrato, um por sessão), `verify-on-stop.py` (Stop) e `session-start.py` (SessionStart: `ensure-repos`, estado inicial e `bin/ws context`). O `Stop` só roda o `verify` quando a impressão digital dos repos (`wslib.fingerprint`, ~40 ms) difere do início da sessão e do último verde. Sem mudança, sai em 70 ms; com mudança, cerca de 14 s. Os git hooks `githooks/commit-msg` e `githooks/pre-push` (que verifica a árvore que está subindo, inclusive num `ws isolate`) entram com `bin/ws hooks install`, que só funciona depois do merge, porque aponta para o checkout principal. São 12 testes em `tests/test_hooks.py`, cobrindo cerca de 75 comandos, com mutação conferida. |
 | 2026-11-07 | 5.1 (antecipado) | Skill `status-geral` usava `gh run list --branch`, que não existe no `gh` 2.4 desta máquina: passou a usar `bin/ws context` e `bin/ws ci`. `mudanca-cross-repo` passou a usar `ws branch`/`isolate`/`verify`/`diff`/`prs --branch`. `AGENTS.md`, `README` e `Makefile` (`make verify`, `make doctor`) atualizados. |
 
 ---
@@ -74,11 +75,11 @@ qualquer sessão (**corrigido**, ver o Andamento), conseguir **verificar** o que
 | 2 | **P0** | Busca a partir da raiz não vê nada | O `.gitignore` ignora `repos/`, e o ripgrep (Grep/Glob) respeita. `rg -l "class JwtProvider" .` → 0. `rg … repos/` → 0 (não segue symlink). Só `rg … repos/oficina-api` acha. | O agente diz "não existe" sobre algo que existe. | ✅ contornado (`ws grep` + regra no `AGENTS.md`); solução completa no 0.2 |
 | 3 | **P0** | Clones aninhados, duplicados e com nomes antigos | `repos/oficina-api` aponta para `/root/oficina-mecanica-tech-challenge`, e os outros três para `…/repos/<nome-antigo>` dentro dele. A app tem 3 worktrees velhos (um em detached HEAD). `find -L repos/oficina-api -name JwtProvider.php` acha **6 cópias**. | Risco de editar a cópia errada; caminhos com nome antigo confundem a regra dos nomes antigos. | aberto (0.1, 0.2) |
 | 4 | **P0** | Trabalho local não publicado | `oficina-api` tem 2 commits fora de qualquer remoto: `5e25782 wip: estado local antes de sincronizar…` e `91d1ad1 test(notifications)…`. | Qualquer reorganização de clones pode perder esse trabalho. | aberto (decisão 1) |
-| 5 | **P0** | Buraco de permissão | O allow `Bash(git -C repos/*)` liberava `push --force`, `reset --hard` e `clean -fdx`, e `Bash(git branch:*)` liberava `branch -D`. O deny `git push --force:*` não casava com `git -C …`. `kubectl` só tinha `apply`/`delete` negados. Nada para `helm`, `aws … delete-*`, `--with-decryption`, `gh pr merge` nem `gh api -X`. `Read(**/.env)` não impedia `cat .env`, e `repos/oficina-api/.env` existe. | Uma alucinação ou uma prompt injection vira dano real. | ✅ settings corrigido; o hook da Fase 3 fecha as formas que regra por padrão não pega |
+| 5 | **P0** | Buraco de permissão | O allow `Bash(git -C repos/*)` liberava `push --force`, `reset --hard` e `clean -fdx`, e `Bash(git branch:*)` liberava `branch -D`. O deny `git push --force:*` não casava com `git -C …`. `kubectl` só tinha `apply`/`delete` negados. Nada para `helm`, `aws … delete-*`, `--with-decryption`, `gh pr merge` nem `gh api -X`. `Read(**/.env)` não impedia `cat .env`, e `repos/oficina-api/.env` existe. | Uma alucinação ou uma prompt injection vira dano real. | ✅ settings + `guard-bash.py` (Fase 3) |
 | 6 | P1 | Merge não depende do CI | A proteção da `main` da app tem `required_status_checks: null` e `enforce_admins: false`. | CI vermelho não bloqueia merge, e seu token (admin) passa por cima. | aberto (decisão 4) |
 | 7 | P1 | Validação local não funciona como o `AGENTS.md` descreve | `make test`/`make stan` do gateway chamam `vendor/bin/phpunit` direto, e não há PHP. `make k8s-render` precisa de `kubectl` (ausente, assim como `kustomize`, `tflint`, `actionlint`, `shellcheck` e o cliente `mysql`). `scripts/php.sh` usa a imagem `oficina-php:8.2`, que nenhum alvo constrói. `make test` da app exige `make up` (compose + `.env` + MySQL), embora os testes rodem em SQLite. | O agente não prova que a mudança funciona: pede permissão a cada passo ou pula a verificação. | ✅ no workspace (`bin/ws verify`, `bin/ws exec`); os Makefiles dos repos seguem como estão (1.1) |
 | 8 | P1 | Não há comando único de verificação nem saída para máquina | O agente monta a sequência por repo a partir de uma tabela em prosa. | Verificação inconsistente, falha difícil de resumir. | ✅ |
-| 9 | P1 | Quase nenhum hook | Só o `SessionStart` novo. | Nada formata, nada bloqueia de verdade, nada obriga a verificar antes de encerrar. | aberto (Fase 3) |
+| 9 | P1 | Quase nenhum hook | Só o `SessionStart` novo. | Nada formata, nada bloqueia de verdade, nada obriga a verificar antes de encerrar. | ✅ (Fase 3) |
 | 10 | P1 | Repos de produto sem `AGENTS.md`/`CLAUDE.md` | Nenhum dos quatro tem. Todo o contexto (20 KB) carrega inteiro em toda sessão. O `.gitignore` da app ignora `.claude/` inteiro. | Sessão aberta direto num repo não sabe nada; toda sessão paga 20 KB de contexto. | aberto (Fase 4) |
 | 11 | P1 | Checagem de contrato só cobre SSM | A skill `checar-contratos` faz à mão o token do JWT, as rotas públicas, o `ClusterSecretStore`, as chaves dos segredos e o RBAC. | A checagem depende de o agente lembrar. | ✅ (Fase 2) |
 | 12 | P2 | Drift entre os CIs | Terraform `1.9.5` no gateway e `1.9.8` nos outros; `tflint` com `continue-on-error`; cache do Composer do gateway pela chave `composer.json`. | Comportamento diferente entre repos. | aberto (1.3) |
@@ -357,7 +358,24 @@ O `ws verify` roda `tests/` no passo `testes` do workspace.
 
 ---
 
-### Fase 3 — Hooks e guardrails · 1 dia
+### Fase 3 — Hooks e guardrails · ✅ feita
+
+> **Como ficou (2026-11-07).** Como descrito abaixo, com estes ajustes:
+>
+> - **Hooks em Python** em vez de `.sh`: lidar com JSON e `shlex` em bash seria frágil.
+> - **`Stop` com impressão digital:** ele dispara ao fim de toda resposta, então só roda o
+>   `verify` quando algo mudou desde o início da sessão e desde o último verde.
+> - **`guard-bash` mais amplo que a tabela do Apêndice B:**
+>   - entra em `$(...)` entre aspas, `xargs`, `bin/ws exec` e `bin/tooling run`;
+>   - ignora corpo de heredoc, mas confere `Co-Authored-By` dentro dele;
+>   - na falta de refspec, olha a branch atual para decidir sobre `git push`;
+>   - nega também `gh api -f` sem `-X GET`, mutation GraphQL, `gh auth token`, `docker push`,
+>     `aws lambda invoke` e `terraform state pull`.
+> - **`pre-push`** verifica a árvore que está subindo, não o clone do checkout principal.
+> - **Git hooks:** prontos, mas instalados só depois do merge (`bin/ws hooks install`), porque
+>   apontam para o `githooks/` do checkout principal.
+> - **Quando passam a valer:** os hooks do Claude Code valem para as sessões abertas depois do
+>   merge desta branch, ou nesta pasta.
 
 **Objetivo:** a regra escrita no `AGENTS.md` passa a ser executada. Toda sessão termina
 verificada sem você precisar pedir.

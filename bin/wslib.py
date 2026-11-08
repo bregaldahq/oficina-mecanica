@@ -1,7 +1,9 @@
-"""O que os scripts Python de bin/ compartilham: onde ficam os repositórios e quais são.
+"""O que os scripts Python de bin/ e os hooks compartilham: onde ficam os repositórios, quais
+são e uma impressão digital do estado deles.
 
 Mesmas regras do bin/ws (que é bash e repete a resolução do diretório).
 """
+import hashlib
 import os
 import subprocess
 from pathlib import Path
@@ -31,6 +33,25 @@ def repo_names() -> list[str]:
         if line and not line.startswith("#"):
             names.append(line.split()[0])
     return names
+
+
+def fingerprint() -> str:
+    """Hash do estado de trabalho do workspace e dos repos: HEAD, arquivos alterados e o conteúdo
+    deles. Muda quando alguém edita, cria, apaga ou commita; não muda com o que o .gitignore
+    ignora (vendor/, .terraform/, .ws/)."""
+    h = hashlib.sha256()
+    base = repos_dir()
+    for path in [ROOT, *(base / n for n in repo_names())]:
+        if not path.is_dir():
+            continue
+        git = lambda *a: subprocess.run(["git", "-C", str(path), *a], capture_output=True).stdout  # noqa: E731
+        status = git("status", "--porcelain", "-uall")
+        h.update(str(path).encode() + git("rev-parse", "HEAD") + status + git("diff", "HEAD"))
+        for line in status.decode(errors="ignore").splitlines():
+            if line.startswith("??"):
+                f = path / line[3:]
+                h.update(f.read_bytes() if f.is_file() else b"")
+    return h.hexdigest()
 
 
 def resolve_repo(arg: str, names: list[str]) -> str:

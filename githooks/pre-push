@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+#
+# Nada de push direto em main ou develop (só por PR), e o repo precisa passar no bin/ws verify
+# --fast antes de subir. OFICINA_PRE_PUSH_VERIFY=0 pula só a verificação.
+# Instalado por `bin/ws hooks install` (core.hooksPath).
+set -euo pipefail
+
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main|refs/heads/develop)
+      echo "pre-push: push direto em ${remote_ref#refs/heads/} é proibido; abra um PR" >&2
+      exit 1
+      ;;
+  esac
+done
+
+[[ "${OFICINA_PRE_PUSH_VERIFY:-1}" == 0 ]] && exit 0
+
+ws="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# O nome vem do remoto: o diretório pode ser um symlink ou ter o nome antigo.
+name="$(basename "$(git remote get-url origin 2>/dev/null || git rev-parse --show-toplevel)" .git)"
+if [[ "$name" == oficina-mecanica ]]; then
+  name=workspace
+elif ! grep -qE "^${name}[[:space:]]" "$ws/repos.txt"; then
+  exit 0
+fi
+# Verifica a árvore que está subindo: num `bin/ws isolate`, ela é um worktree da sessão, não o
+# clone de repos/ do checkout principal.
+top="$(git rev-parse --show-toplevel)"
+if [[ "$(basename "$top")" == "$name" ]]; then
+  export OFICINA_REPOS_DIR="${top%/*}"
+fi
+echo "pre-push: bin/ws verify --repo $name --fast" >&2
+"$ws/bin/ws" verify --repo "$name" --fast >&2

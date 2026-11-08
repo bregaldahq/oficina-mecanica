@@ -349,6 +349,35 @@ O app desktop abre cada sessão num worktree em `.claude/worktrees/<nome>`, onde
 existe. O hook `SessionStart` (`.claude/hooks/ensure-repos.sh`) liga `repos/` ao do checkout
 principal, e `bin/ws` e `bin/check-contracts.py` fazem a mesma resolução sozinhos. Os clones são
 os mesmos do checkout principal: duas sessões abertas ao mesmo tempo mexem nos mesmos arquivos.
+Para isolar, use `bin/ws isolate <branch> <repo...>`.
+
+### Guardrails executados
+
+As regras para agentes, mais abaixo, não dependem só de você lembrar delas.
+
+- **`.claude/hooks/guard-bash.py`** (antes de todo Bash): analisa o comando inteiro, inclusive
+  `&&`, `bash -c`, `$(...)`, `git -C`, `cd x &&` e `bin/ws exec`.
+  - **Nega:** `apply`/`destroy`/`state`, `kubectl`/`helm`/`aws` que alteram algo, leitura de
+    segredo, `gh pr merge`, `gh workflow run`, `gh api` com escrita, force push, push em
+    `main`/`develop`, `--no-verify` e `Co-Authored-By`.
+  - **Pede confirmação:** push, `gh pr create`/`comment`, `reset --hard`, `clean -f`,
+    `restore`, `branch -D`, `stash drop`.
+  - Uma negação vem com o motivo. Não tente outra forma do mesmo comando: explique ao usuário.
+- **`.claude/hooks/guard-edit.py`**: nega edição em `.env`, tfstate, `vendor/`, `.terraform/`,
+  nas cópias aninhadas dos repos e no worktree de outra sessão.
+- **`.claude/hooks/after-edit.py`**: formata `.tf` com `terraform fmt`. Quando o arquivo toca um
+  contrato (migration, JWT, rotas, SSM, segredos, `deploy/`, nomes antigos, domínio,
+  `CONTRATOS.md`), lembra uma vez por sessão o que mais precisa mudar junto.
+- **`.claude/hooks/verify-on-stop.py`** (ao fim de cada resposta): se o estado dos repos mudou
+  desde o início da sessão e desde o último `verify` verde, roda `bin/ws verify --changed
+  --fast`. Vermelho devolve o trabalho para você uma vez. Corrija, ou diga ao usuário o que está
+  vermelho e por quê.
+- **`.claude/hooks/session-start.py`**: liga `repos/` nos worktrees e põe o `bin/ws context` no
+  começo da sessão.
+- **`githooks/`** (`commit-msg` e `pre-push`, instalados com `bin/ws hooks install`): valem para
+  qualquer pessoa ou agente, no Git dos cinco repos.
+  - `commit-msg`: Conventional Commits com escopo, sem acento no assunto, sem `Co-Authored-By`.
+  - `pre-push`: bloqueia push em `main`/`develop` e roda `bin/ws verify --fast` do repo.
 
 ## Validação local
 

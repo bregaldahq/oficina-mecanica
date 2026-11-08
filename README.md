@@ -87,6 +87,7 @@ cd oficina-mecanica
 make setup          # clona os quatro repositórios em repos/
 make doctor         # confere Docker, ferramentas, clones e proteções de branch
 make verify         # roda o que o CI de cada repo roda, local e sem AWS (~30 s)
+bin/ws hooks install  # git hooks de convenção (commit-msg, pre-push) nos cinco repos
 claude              # ou o agente de sua preferência, a partir da raiz
 ```
 
@@ -115,7 +116,9 @@ bin/ws link ~/caminho/onde/estao/os/clones
 | `.claude/skills/` | `status-geral`, `mudanca-cross-repo`, `checar-contratos` |
 | `.claude/agents/` | `guardiao-de-contratos`, revisor de diffs contra o `CONTRATOS.md` |
 | `.claude/settings.json` | libera comandos de leitura, pede confirmação para push e operações git destrutivas, e bloqueia `apply`, `destroy`, `kubectl`/`helm`/`aws` mutantes, merge, deploy manual e leitura de segredos |
-| `.claude/hooks/` | `ensure-repos.sh`: em sessão de worktree, liga `repos/` ao do checkout principal |
+| `.claude/hooks/` | guarda de Bash e de edição, lembretes de contrato, `verify` ao encerrar e retrato dos repos no início da sessão (`AGENTS.md`, "Guardrails executados") |
+| `githooks/` | `commit-msg` e `pre-push` para os cinco repos: `bin/ws hooks install` |
+| `tests/` | testes do checker de contratos e dos hooks (`python3 -m unittest discover -s tests`) |
 | `docs/PLANO-HARNESS-IA.md` | plano de evolução do harness de IA |
 
 ## Princípios
