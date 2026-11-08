@@ -23,6 +23,7 @@ ws="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 name="$(basename "$(git remote get-url origin 2>/dev/null || git rev-parse --show-toplevel)" .git)"
 if [[ "$name" == oficina-mecanica ]]; then
   name=workspace
+  ws="$(git rev-parse --show-toplevel)"  # o workspace verifica a própria árvore que sobe
 elif ! grep -qE "^${name}[[:space:]]" "$ws/repos.txt"; then
   exit 0
 fi
@@ -41,5 +42,9 @@ for sha in ${pushed[@]+"${pushed[@]}"}; do
     exit 0
   fi
 done
+# Dentro de um hook o Git exporta GIT_DIR e afins; herdados, fariam todo `git -C <outro repo>` do
+# verify olhar para este repo.
+# shellcheck disable=SC2046
+unset $(git rev-parse --local-env-vars)
 echo "pre-push: bin/ws verify --repo $name --fast" >&2
 "$ws/bin/ws" verify --repo "$name" --fast >&2
