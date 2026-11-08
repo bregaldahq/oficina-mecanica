@@ -5,7 +5,9 @@
 # Instalado por `bin/ws hooks install` (core.hooksPath).
 set -euo pipefail
 
-while read -r _local_ref _local_sha remote_ref _remote_sha; do
+pushed=()
+while read -r _local_ref local_sha remote_ref _remote_sha; do
+  [[ "$local_sha" =~ ^0+$ ]] || pushed+=("$local_sha")
   case "$remote_ref" in
     refs/heads/main|refs/heads/develop)
       echo "pre-push: push direto em ${remote_ref#refs/heads/} é proibido; abra um PR" >&2
@@ -30,5 +32,14 @@ top="$(git rev-parse --show-toplevel)"
 if [[ "$(basename "$top")" == "$name" ]]; then
   export OFICINA_REPOS_DIR="${top%/*}"
 fi
+# O verify olha a árvore em disco: só vale se é ela que está subindo.
+head="$(git rev-parse HEAD)"
+for sha in ${pushed[@]+"${pushed[@]}"}; do
+  if [[ "$sha" != "$head" ]]; then
+    echo "pre-push: o que sobe ($sha) não é o que está em disco ($head); verificação local pulada." >&2
+    echo "          Para verificar, rode bin/ws verify num bin/ws isolate da branch." >&2
+    exit 0
+  fi
+done
 echo "pre-push: bin/ws verify --repo $name --fast" >&2
 "$ws/bin/ws" verify --repo "$name" --fast >&2

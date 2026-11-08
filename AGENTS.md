@@ -340,13 +340,15 @@ Onde um comando pede `<repo>`, vale o nome curto: `fundacao`, `cluster`, `gatewa
 
 ### Como buscar
 
-`repos/` é ignorado pelo Git deste repositório, e o ripgrep, que o Grep e o Glob usam, respeita
-isso. Os repos também podem ser symlinks, que ele não segue. Uma busca a partir da raiz **não
-encontra nada** dentro de `repos/`.
+Com clones de verdade em `repos/` (o layout do `make setup`), o Grep e o Glob a partir da raiz
+encontram os quatro repos: o `.ignore` devolve `repos/` às buscas, e dentro de cada repo vale o
+`.gitignore` dele. Se `repos/<nome>` for symlink (`bin/ws link`; o `bin/ws doctor` avisa), o
+ripgrep não entra nele.
 
-- Use `bin/ws grep` para buscar nos quatro repos de uma vez.
-- No Grep ou Glob, passe sempre `path: repos/<nome>`, um repo por vez.
-- Nunca conclua que algo não existe a partir de uma busca na raiz.
+- `bin/ws grep` busca nos quatro repos só em arquivos versionados ou novos, em qualquer layout.
+- Numa sessão em worktree, `repos/` é um symlink para o checkout principal: no Grep ou Glob,
+  passe `path: repos/<nome>`.
+- Nunca conclua que algo não existe a partir de uma busca que não entrou nos repos.
 
 ### Sessões em worktree
 

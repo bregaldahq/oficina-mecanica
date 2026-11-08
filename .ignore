@@ -1,0 +1,5 @@
+# O .gitignore ignora repos/ (cada repo tem o próprio Git), e o ripgrep, usado pelo Grep e pelo
+# Glob, respeitaria isso. Este arquivo devolve repos/ às buscas a partir da raiz; dentro de cada
+# repo continua valendo o .gitignore dele (vendor/, .terraform/...). Só funciona com clones de
+# verdade em repos/: o ripgrep não segue symlink.
+!/repos/
