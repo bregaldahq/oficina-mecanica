@@ -11,6 +11,7 @@ e aponta:
 
 Sai com código 1 se houver erro. Uso: bin/check-contracts.py [--verbose]
 """
+import os
 import re
 import subprocess
 import sys
@@ -18,7 +19,23 @@ from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-REPOS = ROOT / "repos"
+
+
+def repos_dir() -> Path:
+    # Mesma regra do bin/ws: num worktree sem repos/, usa o do checkout principal.
+    if os.environ.get("OFICINA_REPOS_DIR"):
+        return Path(os.environ["OFICINA_REPOS_DIR"])
+    local = ROOT / "repos"
+    if local.exists():
+        return local
+    common = subprocess.run(
+        ["git", "-C", str(ROOT), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        capture_output=True, text=True,
+    )
+    return Path(common.stdout.strip()).parent / "repos" if common.returncode == 0 else local
+
+
+REPOS = repos_dir()
 EXTENSIONS = {".tf", ".yml", ".yaml", ".sh", ".php", ".py", ".json"}
 
 # Aceita as três formas de escrever o ambiente que aparecem nos repos:

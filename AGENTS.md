@@ -55,8 +55,9 @@ Cliente ── GET /api/... + Bearer ──► API Gateway ──► Lambda jwt-
 - **Regra de negócio** fica só na aplicação, `oficina-api`.
 
 Dois papéis no JWT: `customer` (token vem do `POST /auth/cpf` da Lambda) e `admin` (token vem
-do `POST /api/auth/login` da aplicação). O mesmo `JwtProvider` existe nos dois repos, copiado byte
-a byte.
+do `POST /api/auth/login` da aplicação). Há um `JwtProvider` em cada repo. Namespace, comentários
+e imports diferem, mas a montagem do token é idêntica, e o teste de contrato dos dois lados trava
+isso.
 
 ## Como funciona cada repo
 
@@ -148,7 +149,8 @@ entre elas é o `handler`. Assim, quem emite e quem valida o token rodam o mesmo
   - emite o JWT com `role=customer`.
 - `Handler/JwtAuthorizerHandler.php` é o authorizer REQUEST com *simple response*. Ele valida
   assinatura e `exp` e devolve `context.customerId` e `context.role`.
-- `Security/JwtProvider.php`: cópia byte a byte do `JwtProvider` da aplicação.
+- `Security/JwtProvider.php`: monta o token exatamente como o `JwtProvider` da aplicação. O
+  arquivo não é idêntico (namespace, comentários); o que precisa ser igual é o token.
 - `Secrets/SecretsManagerProvider.php`: guarda o segredo em cache estático entre invocações. Uma
   rotação só é percebida quando um container novo sobe.
 - `Domain/Cpf.php` replica o value object `Document` da aplicação, e
@@ -306,9 +308,27 @@ make setup                 # baixa os repos que faltam em repos/
 bin/ws status              # branch, arquivos sujos e divergência de cada repo
 bin/ws pull                # fast-forward em todos
 bin/ws prs                 # PRs abertos em todos
+bin/ws grep -E 'padrão'    # busca nos quatro repos (só arquivos versionados ou novos)
 bin/ws run git log -3 --oneline
 bin/check-contracts.py     # acoplamento SSM consistente?
 ```
+
+### Como buscar
+
+`repos/` é ignorado pelo Git deste repositório, e o ripgrep, que o Grep e o Glob usam, respeita
+isso. Os repos também podem ser symlinks, que ele não segue. Uma busca a partir da raiz **não
+encontra nada** dentro de `repos/`.
+
+- Use `bin/ws grep` para buscar nos quatro repos de uma vez.
+- No Grep ou Glob, passe sempre `path: repos/<nome>`, um repo por vez.
+- Nunca conclua que algo não existe a partir de uma busca na raiz.
+
+### Sessões em worktree
+
+O app desktop abre cada sessão num worktree em `.claude/worktrees/<nome>`, onde `repos/` não
+existe. O hook `SessionStart` (`.claude/hooks/ensure-repos.sh`) liga `repos/` ao do checkout
+principal, e `bin/ws` e `bin/check-contracts.py` fazem a mesma resolução sozinhos. Os clones são
+os mesmos do checkout principal: duas sessões abertas ao mesmo tempo mexem nos mesmos arquivos.
 
 ## Validação local
 

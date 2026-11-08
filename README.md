@@ -103,11 +103,13 @@ bin/ws link ~/caminho/onde/estao/os/clones
 | `CLAUDE.md` | importa o `AGENTS.md` e lista o que é específico do Claude Code |
 | `Makefile` | atalhos: `make setup`, `make pull`, `make status`, `make prs`, `make contratos` |
 | `repos.txt` | lista de repositórios, na ordem de apply. Para incluir um repo, adicione uma linha |
-| `bin/ws` | `clone`, `link`, `pull`, `status`, `prs`, `run <cmd>` em todos os repos |
+| `bin/ws` | `clone`, `link`, `pull`, `status`, `prs`, `grep <padrão>`, `run <cmd>` em todos os repos |
 | `bin/check-contracts.py` | confere o acoplamento por SSM: consumidor sem dono, dono duplicado, parâmetro órfão |
 | `.claude/skills/` | `status-geral`, `mudanca-cross-repo`, `checar-contratos` |
 | `.claude/agents/` | `guardiao-de-contratos`, revisor de diffs contra o `CONTRATOS.md` |
-| `.claude/settings.json` | libera comandos de leitura e bloqueia `apply`, `destroy`, deploy manual e leitura de segredos |
+| `.claude/settings.json` | libera comandos de leitura, pede confirmação para push e operações git destrutivas, e bloqueia `apply`, `destroy`, `kubectl`/`helm`/`aws` mutantes, merge, deploy manual e leitura de segredos |
+| `.claude/hooks/` | `ensure-repos.sh`: em sessão de worktree, liga `repos/` ao do checkout principal |
+| `docs/PLANO-HARNESS-IA.md` | plano de evolução do harness de IA |
 
 ## Princípios
 

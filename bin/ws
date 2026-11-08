@@ -8,13 +8,27 @@
 #   bin/ws pull               fast-forward da branch atual de cada repo
 #   bin/ws status             branch, sujeira e divergência com o remoto
 #   bin/ws prs                PRs abertos em cada repo
+#   bin/ws grep <padrão...>   git grep em todos os repos (só arquivos versionados ou novos)
 #   bin/ws run <comando...>   executa o comando dentro de cada repo
 #
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OWNER="${OFICINA_OWNER:-bregaldahq}"
-REPOS_DIR="$ROOT/repos"
+
+# Num worktree deste repo não existe repos/ (não é versionado): usa o do checkout principal.
+# OFICINA_REPOS_DIR força outro lugar.
+repos_dir() {
+  if [[ -n "${OFICINA_REPOS_DIR:-}" ]]; then echo "$OFICINA_REPOS_DIR"; return; fi
+  if [[ -e "$ROOT/repos" ]]; then echo "$ROOT/repos"; return; fi
+  local common
+  if common="$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
+    echo "$(dirname "$common")/repos"
+  else
+    echo "$ROOT/repos"
+  fi
+}
+REPOS_DIR="$(repos_dir)"
 
 repos() {
   grep -vE '^\s*(#|$)' "$ROOT/repos.txt" | awk '{print $1}'
@@ -94,12 +108,23 @@ run_one() {
   (cd "$REPOS_DIR/$name" && "$@") || echo "   (saiu com erro)"
 }
 
+# git grep, e não rg: só olha o que o repo versiona (mais os arquivos novos), então ignora
+# vendor/, .terraform/, clones aninhados e worktrees velhos sem precisar de filtro.
+cmd_grep() {
+  [[ $# -gt 0 ]] || { echo "uso: bin/ws grep <padrão> [opções do git grep]"; exit 1; }
+  for name in $(repos); do
+    [[ -d "$REPOS_DIR/$name" ]] || continue
+    git -C "$REPOS_DIR/$name" grep --untracked -n -I "$@" | sed "s#^#repos/$name/#" || true
+  done
+}
+
 case "${1:-}" in
   clone)  cmd_clone ;;
   link)   shift; cmd_link "$@" ;;
   pull)   each pull_one ;;
   status) each status_one ;;
   prs)    each prs_one ;;
+  grep)   shift; cmd_grep "$@" ;;
   run)
     shift
     [[ $# -gt 0 ]] || { echo "uso: bin/ws run <comando...>"; exit 1; }
@@ -108,7 +133,7 @@ case "${1:-}" in
     done
     ;;
   *)
-    sed -n '3,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '3,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     exit 1
     ;;
 esac
