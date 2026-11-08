@@ -17,8 +17,8 @@ Uso: bin/ws verify [--repo NOME]... [--changed] [--fast] [--image] [--json]
 O resultado também vai para .ws/verify/latest.json, e o log de cada passo para
 .ws/verify/logs/<repo>-<passo>.log. Sem --repo, um OK grava em .ws/verify/ok-fingerprint o estado
 aprovado, que o hook Stop usa para não verificar duas vezes a mesma coisa. Sai com 1 se algum passo bloqueante falhar. Passo não
-bloqueante (o tflint, que no CI tem continue-on-error, e o actionlint, que não está no CI) só
-gera aviso.
+bloqueante (o tflint, que no CI tem continue-on-error) só gera aviso. O passo workflows
+(actionlint, que não está no CI) bloqueia: workflow inválido nem carrega no GitHub.
 """
 import argparse
 import json
@@ -77,7 +77,8 @@ def tf_validate(repo: Path, log: TextIO) -> bool:
 
 TF_VALIDATE = tf_validate
 COMPOSER = tool("composer install --no-interaction --prefer-dist --no-progress")
-ACTIONLINT = tool("actionlint")
+# Sem o shellcheck embutido: só sintaxe, expressões e tipos dos workflows, que são erro de verdade.
+ACTIONLINT = tool("actionlint -shellcheck= -pyflakes=")
 
 FORBIDDEN_SQL = re.compile(r"^\s*(CREATE DATABASE|USE |DELIMITER)", re.I | re.M)
 
@@ -155,14 +156,14 @@ STEPS: dict[str, list[Step]] = {
         Step("tf-validate", TF_VALIDATE, "pr.yml: terraform validate (aqui sem backend)"),
         Step("sql-lint", sql_lint, "pr.yml: sem CREATE DATABASE, USE nem DELIMITER"),
         Step("migrations-2x", migrations_twice, "pr.yml: migrations duas vezes num MySQL 8.0 e seed", slow=True),
-        Step("actionlint", ACTIONLINT, "fora do CI", blocking=False),
+        Step("workflows", ACTIONLINT, "fora do CI: workflow inválido nem carrega no GitHub"),
     ],
     "oficina-infra-cluster": [
         Step("tf-fmt", TF_FMT, "pr.yml: terraform fmt"),
         Step("tf-validate", TF_VALIDATE, "pr.yml: terraform validate"),
         Step("tflint", tool("tflint --init >/dev/null && tflint --recursive"),
              "pr.yml: tflint (continue-on-error)", blocking=False),
-        Step("actionlint", ACTIONLINT, "fora do CI", blocking=False),
+        Step("workflows", ACTIONLINT, "fora do CI: workflow inválido nem carrega no GitHub"),
     ],
     "oficina-gateway-auth": [
         Step("composer", COMPOSER, "pr.yml: composer install"),
@@ -171,7 +172,7 @@ STEPS: dict[str, list[Step]] = {
         Step("phpstan", tool("vendor/bin/phpstan analyse --no-progress"), "pr.yml: PHPStan nível 8"),
         Step("tf-fmt", TF_FMT, "pr.yml: terraform fmt"),
         Step("tf-validate", TF_VALIDATE, "pr.yml: terraform validate"),
-        Step("actionlint", ACTIONLINT, "fora do CI", blocking=False),
+        Step("workflows", ACTIONLINT, "fora do CI: workflow inválido nem carrega no GitHub"),
     ],
     "oficina-api": [
         Step("composer", COMPOSER, "pr.yml: composer install"),
@@ -183,7 +184,7 @@ STEPS: dict[str, list[Step]] = {
         Step("kustomize", tool("kustomize build deploy/overlays/hml >/dev/null"
                                " && kustomize build deploy/overlays/prod >/dev/null"), "pr.yml: manifests"),
         Step("image", app_image, "pr.yml: build da imagem e extensão New Relic", image=True),
-        Step("actionlint", ACTIONLINT, "fora do CI", blocking=False),
+        Step("workflows", ACTIONLINT, "fora do CI: workflow inválido nem carrega no GitHub"),
     ],
     WORKSPACE: [
         Step("shellcheck", tool("shellcheck bin/ws bin/tooling .claude/hooks/*.sh githooks/*"), "-"),

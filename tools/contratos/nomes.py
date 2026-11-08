@@ -55,13 +55,13 @@ def check(repos: Repos) -> list[Finding]:
         if missing:
             out.append(Finding("TAG-1", "erro", "AGENTS.md", f"locals.tf sem a(s) tag(s) obrigatória(s) {', '.join(missing)}",
                                repos.name(short), [repos.at(short, "locals.tf")]))
-        m = re.search(r"^\s*Repo\s*=\s*(.+)$", text, re.M)
+        # O valor é uma string ou local.<nome>; o resto da linha pode ser comentário.
+        m = re.search(r'^\s*Repo\s*=\s*(?:"([^"]*)"|local\.(\w+))', text, re.M)
         if m:
-            value = m.group(1).strip()
-            if value.startswith("local."):
-                ref = re.search(rf'^\s*{value.split(".", 1)[1]}\s*=\s*"([^"]+)"', text, re.M)
-                value = ref.group(1) if ref else value
-            value = value.strip('"')
+            value = m.group(1)
+            if value is None:
+                ref = re.search(rf'^\s*{m.group(2)}\s*=\s*"([^"]+)"', text, re.M)
+                value = ref.group(1) if ref else f"local.{m.group(2)}"
             if value != REPOS[short][1]:
                 out.append(Finding("NOME-1", "erro", "README", f"tag Repo = '{value}'; tem de continuar '{REPOS[short][1]}' "
                                    "(trocar dispara um apply que mexe em todos os recursos)",

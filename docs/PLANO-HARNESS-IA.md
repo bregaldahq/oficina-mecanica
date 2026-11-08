@@ -32,7 +32,7 @@ qualquer sessão (**corrigido**, ver o Andamento), conseguir **verificar** o que
 | 1 | Verificação local num comando | autonomia sem verificação é aposta | ✅ no workspace; PRs nos repos pendentes |
 | 2 | Checagem de contrato completa | o maior risco do sistema está *entre* os repos | ✅ |
 | 3 | Hooks e guardrails | regra escrita vira regra executada; toda sessão termina verificada | ✅ |
-| 4 | Contexto em camadas | contexto certo, na hora certa, mais barato | 1 dia |
+| 4 | Contexto em camadas | contexto certo, na hora certa, mais barato | ✅ (PRs e 4.2 pendentes) |
 | 5 | Comandos: skills e subagentes | cada mudança típica vira um comando seu | 2–3 dias |
 | 6 | A sessão interativa | menos interrupção, status visível, sessões paralelas | ½ dia |
 | 7 | Medir e melhorar o harness | saber se cada mudança no harness ajudou | 1 dia + contínuo |
@@ -49,6 +49,8 @@ qualquer sessão (**corrigido**, ver o Andamento), conseguir **verificar** o que
 | 2026-11-07 | 1 Verificação local | `tooling/Dockerfile` + `bin/tooling`: imagem com PHP 8.2, Composer 2.7, Terraform 1.9.8, tflint, kustomize 5.4.3, actionlint e shellcheck. `bin/ws verify` (`bin/verify.py`): os passos do `pr.yml` dos 4 repos em paralelo, incluindo as migrations duas vezes num MySQL 8.0, em **~25 s**, com `.ws/verify/latest.json`. Também `bin/ws exec`, `context`, `ci`, `diff`, `prs --branch`, `branch`, `isolate` e `doctor`. Testado: tudo verde nos 4 repos; defeito plantado (`terraform fmt`) vira vermelho com o diff; `isolate`/`--rm` ida e volta; nenhum arquivo dos repos fica alterado. |
 | 2026-11-07 | 2 Contratos | `bin/check-contracts.py` virou CLI de `tools/contratos/`: 8 famílias (ssm, jwt, rotas, segredos, k8s, migrations, nomes, docs) e 18 checagens, com `--json` e `--only`. Erros conhecidos e aceitos ficam em `tools/contratos/conhecidos.txt`, com motivo. São 33 testes com fixtures em `tests/test_contratos.py`, e desligar qualquer família faz de 3 a 6 testes falharem. Rodando nos repos reais, achou: o webhook de aprovação inalcançável pelo gateway (achado 19, registrado como conhecido), o §5 do `CONTRATOS.md` desatualizado (achado 20) e a versão do Terraform diferente no gateway (achado 12). Skill `checar-contratos` e subagente `guardiao-de-contratos` passaram a partir do `--json`; os testes entraram no `bin/ws verify`. |
 | 2026-11-07 | 3 Hooks e guardrails | Os hooks ficaram em Python, em `.claude/hooks/`: `guard-bash.py` (PreToolUse Bash), `guard-edit.py` (PreToolUse Edit/Write), `after-edit.py` (PostToolUse: `terraform fmt` e lembretes de contrato, um por sessão), `verify-on-stop.py` (Stop) e `session-start.py` (SessionStart: `ensure-repos`, estado inicial e `bin/ws context`). O `Stop` só roda o `verify` quando a impressão digital dos repos (`wslib.fingerprint`, ~40 ms) difere do início da sessão e do último verde. Sem mudança, sai em 70 ms; com mudança, cerca de 14 s. Os git hooks `githooks/commit-msg` e `githooks/pre-push` (que verifica a árvore que está subindo, inclusive num `ws isolate`) entram com `bin/ws hooks install`, que só funciona depois do merge, porque aponta para o checkout principal. São 12 testes em `tests/test_hooks.py`, cobrindo cerca de 75 comandos, com mutação conferida. |
+| 2026-11-07 | 4 Contexto | `AGENTS.md` + `CLAUDE.md` (`@AGENTS.md`) escritos para os 4 repos de produto, a partir de `develop`, na branch local **`chore/agents-md`** de cada um (commitada, **sem push**). Cobrem o que o repo cria, os contratos que publica e consome (conferidos no `data.tf`/`ssm.tf`), como validar sem AWS, as armadilhas (sintoma → causa → o que pega), as convenções e, na app, o glossário. Hook novo `repo-context.py` (PostToolUse de Read/Edit/Write/Grep/Glob) injeta o `AGENTS.md` do repo uma vez por sessão. O DOC-1 passou a conferir os caminhos citados nesses arquivos. O `AGENTS.md` do workspace dizia nodes `t3.small`; em `develop` são `t3.medium` (corrigido). |
+| 2026-11-07 | Achados ao rodar em `develop` | Falso positivo do `NOME-1` com comentário no fim da linha da tag (corrigido, com teste). O `deploy.yml` da fundação em `develop` é YAML inválido (achado 21): a correção ficou na branch local **`fix/deploy-yml-invalido`** (sem push). O passo do actionlint no `verify` passou a ser `workflows`, bloqueante e sem o shellcheck embutido. |
 | 2026-11-07 | 5.1 (antecipado) | Skill `status-geral` usava `gh run list --branch`, que não existe no `gh` 2.4 desta máquina: passou a usar `bin/ws context` e `bin/ws ci`. `mudanca-cross-repo` passou a usar `ws branch`/`isolate`/`verify`/`diff`/`prs --branch`. `AGENTS.md`, `README` e `Makefile` (`make verify`, `make doctor`) atualizados. |
 
 ---
@@ -80,7 +82,7 @@ qualquer sessão (**corrigido**, ver o Andamento), conseguir **verificar** o que
 | 7 | P1 | Validação local não funciona como o `AGENTS.md` descreve | `make test`/`make stan` do gateway chamam `vendor/bin/phpunit` direto, e não há PHP. `make k8s-render` precisa de `kubectl` (ausente, assim como `kustomize`, `tflint`, `actionlint`, `shellcheck` e o cliente `mysql`). `scripts/php.sh` usa a imagem `oficina-php:8.2`, que nenhum alvo constrói. `make test` da app exige `make up` (compose + `.env` + MySQL), embora os testes rodem em SQLite. | O agente não prova que a mudança funciona: pede permissão a cada passo ou pula a verificação. | ✅ no workspace (`bin/ws verify`, `bin/ws exec`); os Makefiles dos repos seguem como estão (1.1) |
 | 8 | P1 | Não há comando único de verificação nem saída para máquina | O agente monta a sequência por repo a partir de uma tabela em prosa. | Verificação inconsistente, falha difícil de resumir. | ✅ |
 | 9 | P1 | Quase nenhum hook | Só o `SessionStart` novo. | Nada formata, nada bloqueia de verdade, nada obriga a verificar antes de encerrar. | ✅ (Fase 3) |
-| 10 | P1 | Repos de produto sem `AGENTS.md`/`CLAUDE.md` | Nenhum dos quatro tem. Todo o contexto (20 KB) carrega inteiro em toda sessão. O `.gitignore` da app ignora `.claude/` inteiro. | Sessão aberta direto num repo não sabe nada; toda sessão paga 20 KB de contexto. | aberto (Fase 4) |
+| 10 | P1 | Repos de produto sem `AGENTS.md`/`CLAUDE.md` | Nenhum dos quatro tem. Todo o contexto (20 KB) carrega inteiro em toda sessão. O `.gitignore` da app ignora `.claude/` inteiro. | Sessão aberta direto num repo não sabe nada; toda sessão paga 20 KB de contexto. | ✅ escrito em `chore/agents-md` (local); falta PR e, depois do merge, enxugar o workspace (4.2) |
 | 11 | P1 | Checagem de contrato só cobre SSM | A skill `checar-contratos` faz à mão o token do JWT, as rotas públicas, o `ClusterSecretStore`, as chaves dos segredos e o RBAC. | A checagem depende de o agente lembrar. | ✅ (Fase 2) |
 | 12 | P2 | Drift entre os CIs | Terraform `1.9.5` no gateway e `1.9.8` nos outros; `tflint` com `continue-on-error`; cache do Composer do gateway pela chave `composer.json`. | Comportamento diferente entre repos. | aberto (1.3) |
 | 13 | P2 | `gh` 2.4.0, de 2022 | `gh --version`. Não tem `gh run list --branch`, e a skill `status-geral` dependia disso. | O passo de CI da skill nunca funcionou nesta máquina. | ✅ contornado (`bin/ws ci` usa a API REST); atualizar o `gh` continua recomendado (`bin/ws doctor` avisa) |
@@ -90,6 +92,7 @@ qualquer sessão (**corrigido**, ver o Andamento), conseguir **verificar** o que
 | 17 | P2 | Lockfile do Terraform não versionado | A fundação e o cluster têm `.terraform.lock.hcl` no `.gitignore`; só o gateway versiona. | Cada run de CI resolve os providers de novo: o plan de hoje pode usar outro provider que o de ontem. | aberto (PR na fundação e no cluster, se você quiser) |
 | 19 | **P1** | Webhook de aprovação inalcançável pelo gateway | `POST /api/service-orders/{id}/approval` é público na app (`public/index.php:139`, protegido por `X-Webhook-Token`), mas no gateway só passa pelo `ANY /api/{proxy+}`, que exige `Authorization`. Sem esse header, o HTTP API responde 401 antes de chamar o authorizer, e o webhook não está nem no `PUBLIC_ROUTES` do authorizer. As sondas e o login já ganharam rota dedicada por esse mesmo motivo. Achado pelo `ROTA-1`. | Quem chamar o webhook de fora recebe 401. | aberto: precisa de rota dedicada no `apigateway.tf` (PR no gateway); hoje em `conhecidos.txt` |
 | 20 | P2 | §5 do `CONTRATOS.md` desatualizado | A tabela do API Gateway lista 2 rotas; o `apigateway.tf` tem 8 (sondas, login, `/docs`, `/swagger.yaml`). O texto ainda diz que o login passa pelo `{proxy+}`. Achado pelo `ROTA-2` (6 avisos). | Quem lê o contrato tira conclusão errada sobre o gateway. | aberto: adendo no `CONTRATOS.md` (PR na app) |
+| 21 | **P1** | Workflow de deploy da fundação inválido em `develop` | O commit "chore: remover gatilho de push do deploy" deixou o `paths-ignore:` órfão dentro de `on:`, e o `actionlint` responde `could not parse as YAML` (linha 11). Em `main` o arquivo está certo. | O deploy da fundação não carrega a partir de `develop`. | correção pronta em `fix/deploy-yml-invalido` (local, sem push); PR depende da decisão 6 |
 | 18 | P2 | Cache do php-cs-fixer versionado | `.php-cs-fixer.cache` está no Git da app; o dry-run o reescreve. | Sujeira em todo `make lint`. O `verify` usa `--using-cache=no`. | aberto (PR pequeno na app) |
 
 ---
@@ -450,7 +453,23 @@ Configuração dos hooks no Apêndice A.
 
 ---
 
-### Fase 4 — Contexto em camadas · 1 dia
+### Fase 4 — Contexto em camadas · ✅ feita (com duas pendências que dependem de PR)
+
+> **Como ficou (2026-11-07).**
+>
+> - **4.1:** feito na branch local `chore/agents-md` de cada repo de produto, a partir de
+>   `develop`, sem push. O `.gitignore` da app não precisou mudar, porque o `CLAUDE.md` fica na
+>   raiz.
+> - **4.2, adiado de propósito:** enxugar o `AGENTS.md` do workspace só depois do merge dos PRs
+>   `chore/agents-md`. É a regra do produtor antes do consumidor: sem os arquivos nos repos, as
+>   sessões perderiam o detalhe. O resumo que entra no lugar de "Como funciona cada repo" tem
+>   um parágrafo por repo e aponta para `repos/<nome>/AGENTS.md`.
+> - **4.3, substituído:** os lembretes do `after-edit.py` (Fase 3) cobrem os diretórios
+>   sensíveis só quando o agente mexe neles, e o `repo-context.py` carrega o `AGENTS.md` do repo
+>   sob demanda. Um `CLAUDE.md` por diretório repetiria o mesmo conteúdo num terceiro lugar.
+> - **4.4 e 4.5:** dentro dos `AGENTS.md` dos repos.
+> - **4.6:** a memória guarda duas preferências suas (uso interativo; revisão completa antes de
+>   cada etapa).
 
 **Objetivo:** cada sessão carrega só o que precisa. Uma sessão aberta direto num repo tem o
 contexto daquele repo.
@@ -648,7 +667,7 @@ deveria cair, e a mesma lição não deveria aparecer duas vezes.
 | 3 | IA automatizada no GitHub e rotinas agendadas? | **respondida:** não; uso interativo pelo Claude Code |
 | 4 | Ligar `enforce_admins` e checks obrigatórios em `main` e `develop` (0.6)? Você também perde o merge forçado. | aberta |
 | 5 | Você cria um perfil AWS só-leitura para o agente? (Eu não crio recurso na AWS.) | aberta |
-| 6 | Posso abrir os PRs nos repos de produto que o plano prevê (1.1 Makefile/`php.sh`, 1.3 scripts de CI, achados 17 a 20 — inclusive a rota do webhook e o adendo ao §5 —, Fase 4.1 `AGENTS.md` por repo)? Ficam como draft para `develop`. | aberta |
+| 6 | Posso abrir os PRs nos repos de produto que o plano prevê (já prontas localmente: `chore/agents-md` nos 4 repos e `fix/deploy-yml-invalido` na fundação; a fazer: 1.1 Makefile/`php.sh`, 1.3 scripts de CI, achados 17 a 20, inclusive a rota do webhook e o adendo ao §5)? Ficam como draft para `develop`. | aberta |
 | 7 | Achado 16: conferir a policy de confiança dos roles `oficina-gha-*` (OIDC falhando em `develop`). Só você tem acesso. | aberta |
 
 ## 6. Fora do escopo

@@ -107,7 +107,7 @@ dos segredos.
 
 **O que cria.**
 - `eks.tf`: cluster EKS (versão em `envs/*.tfvars`, hoje `1.31`) e um managed node group de
-  `t3.small`, de 2 a 4 nodes, nas **subnets públicas** com IP público. Cada node recebe o SG do
+  `t3.medium`, de 2 a 4 nodes, nas **subnets públicas** com IP público. Cada node recebe o SG do
   node, o SG do cluster e o SG crachá do banco. `capacity_type` é `SPOT` em hml e `ON_DEMAND`
   em prod.
 - `ecr.tf`: repositório `oficina-api`, com scan on push e retenção das últimas 10 imagens.
@@ -372,6 +372,8 @@ As regras para agentes, mais abaixo, não dependem só de você lembrar delas.
   desde o início da sessão e desde o último `verify` verde, roda `bin/ws verify --changed
   --fast`. Vermelho devolve o trabalho para você uma vez. Corrija, ou diga ao usuário o que está
   vermelho e por quê.
+- **`.claude/hooks/repo-context.py`**: na primeira vez que a sessão lê, busca ou edita algo em
+  `repos/<nome>/`, põe no contexto o `AGENTS.md` daquele repo, se ele existir.
 - **`.claude/hooks/session-start.py`**: liga `repos/` nos worktrees e põe o `bin/ws context` no
   começo da sessão.
 - **`githooks/`** (`commit-msg` e `pre-push`, instalados com `bin/ws hooks install`): valem para
@@ -395,7 +397,7 @@ IaC é `fmt` + `validate` sem backend.
   e o build da imagem de produção com `--image`;
 - **workspace:** shellcheck, Python, os testes de `tests/` e `check-contracts`.
 
-O `actionlint` roda em todos os repos como aviso. Leva cerca de 30 s com tudo; `--changed` olha
+O passo `workflows` (actionlint) confere a sintaxe dos workflows de todos os repos e bloqueia. Leva cerca de 30 s com tudo; `--changed` olha
 só os repos com mudança, e `--fast` pula as migrations. O resultado vai para
 `.ws/verify/latest.json` e os logs para `.ws/verify/logs/`.
 

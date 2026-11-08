@@ -390,6 +390,13 @@ class ContratosTest(unittest.TestCase):
         self.assertFinds(edit("cluster", "envs/hml.tfvars", "oficina-gha-oficina-mecanica-tech-challenge", "oficina-gha-oficina-api"),
                          "NOME-1")
 
+    def test_tag_repo_com_comentario_no_fim_da_linha(self):
+        with Cenario(edit("gateway", "locals.tf", 'Repo        = "oficina-lambda-auth"',
+                          'Repo        = "oficina-lambda-auth" # nome antigo, de propósito')) as c:
+            self.assertEqual([f.mensagem for f in c.run() if f.id == "NOME-1"], [])
+        self.assertFinds(edit("gateway", "locals.tf", 'Repo        = "oficina-lambda-auth"',
+                              'Repo        = "oficina-gateway-auth" # novo'), "NOME-1")
+
     def test_tag_obrigatoria_ausente(self):
         self.assertFinds(edit("gateway", "locals.tf", '    ManagedBy   = "terraform"\n', ""), "TAG-1")
 

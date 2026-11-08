@@ -40,4 +40,13 @@ def check(repos: Repos) -> list[Finding]:
             if not exists(repos, cited):
                 out.append(Finding("DOC-1", "aviso", "contexto", f"{rel} cita `{cited}`, que não existe em nenhum repo",
                                    f"{rel} {cited}", [Local("workspace", rel, line)]))
+    # O AGENTS.md de cada repo cita caminhos relativos a ele (ou a outro repo, ao falar dele).
+    for short in REPOS:
+        if not repos.has(short):
+            continue
+        text = repos.read(short, "AGENTS.md")
+        for cited, line in candidates(text):
+            if not (repos.path(short) / cited).exists() and not exists(repos, cited):
+                out.append(Finding("DOC-1", "aviso", "contexto", f"o AGENTS.md cita `{cited}`, que não existe",
+                                   f"{repos.name(short)}/AGENTS.md {cited}", [repos.at(short, "AGENTS.md", line)]))
     return out

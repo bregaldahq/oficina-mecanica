@@ -188,6 +188,25 @@ class AfterEditTest(unittest.TestCase):
             self.assertEqual(tf.read_text(), "locals {\n  a = 1\n}\n")
 
 
+class RepoContextTest(unittest.TestCase):
+    def run_hook(self, project: Path, tool_input: dict, session: str) -> str:
+        event = {"tool_input": tool_input, "session_id": session}
+        out = subprocess.run([str(HOOKS / "repo-context.py")], input=json.dumps(event), capture_output=True, text=True,
+                             env={**os.environ, "CLAUDE_PROJECT_DIR": str(project)})
+        return json.loads(out.stdout)["hookSpecificOutput"]["additionalContext"] if out.stdout else ""
+
+    def test_agents_md_do_repo_uma_vez_por_sessao(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            for name in ("oficina-api", "oficina-infra-cluster"):
+                (project / "repos" / name).mkdir(parents=True)
+                (project / "repos" / name / "AGENTS.md").write_text(f"guia do {name}\n")
+            self.assertIn("guia do oficina-api", self.run_hook(project, {"file_path": f"{tmp}/repos/oficina-api/src/x.php"}, "s1"))
+            self.assertEqual(self.run_hook(project, {"file_path": f"{tmp}/repos/oficina-api/y.php"}, "s1"), "")
+            self.assertIn("guia do oficina-infra-cluster", self.run_hook(project, {"path": "repos/oficina-infra-cluster"}, "s1"))
+            self.assertEqual(self.run_hook(project, {"file_path": f"{tmp}/AGENTS.md"}, "s1"), "")
+
+
 class GitHooksTest(unittest.TestCase):
     def commit_msg(self, message: str) -> int:
         with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
