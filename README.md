@@ -1,28 +1,95 @@
-# oficina-workspace
+# Oficina Mecânica
 
-Workspace que reúne os quatro repositórios do sistema da **Oficina Mecânica** (Tech Challenge
-SOAT, Fase 3) para trabalhar com agentes de IA — Claude Code, Codex ou qualquer ferramenta que
-leia `AGENTS.md` — enxergando o sistema inteiro de uma vez.
+Sistema de gestão de oficina mecânica: ordens de serviço do recebimento do veículo à entrega,
+orçamento aprovado pelo cliente, estoque de peças e catálogo de serviços. Desenvolvido como
+**Tech Challenge da pós-graduação SOAT (Fase 3)**, roda na AWS: API em PHP 8.2 num cluster EKS,
+autenticação do cliente por CPF em Lambda, API Gateway na borda e RDS MySQL.
 
-Não há código de produto aqui: só o mapa, as regras e as ferramentas para operar os repos juntos.
+Este é o **repositório principal** do projeto. Ele não tem código de produto: reúne o mapa do
+sistema, as regras que valem para todos os repositórios e as ferramentas para operar os quatro
+juntos, inclusive com agentes de IA (Claude Code, Codex ou qualquer ferramenta que leia
+`AGENTS.md`).
 
-| Repositório | Papel |
+## Repositórios
+
+O sistema se divide pelo **ciclo de vida** dos recursos (ADR-008). O que é durável fica embaixo e
+o que muda todo dia fica em cima:
+
+| Ordem | Repositório | O que tem | Stack | Muda |
+|---|---|---|---|---|
+| 1 | [`oficina-infra-fundacao`](https://github.com/bregaldahq/oficina-infra-fundacao) | VPC, subnets, RDS MySQL, **todos** os segredos, migrations SQL | Terraform | raríssimo |
+| 2 | [`oficina-infra-cluster`](https://github.com/bregaldahq/oficina-infra-cluster) | EKS, node group, add-ons Helm, ECR, NLB interno | Terraform | ocasional |
+| 3 | [`oficina-gateway-auth`](https://github.com/bregaldahq/oficina-gateway-auth) | API Gateway, VPC Link, Lambdas `auth-cpf` e `jwt-authorizer` | PHP 8.2 (Bref) + Terraform | ocasional |
+| 4 | [`oficina-api`](https://github.com/bregaldahq/oficina-api) | API REST (DDD, Clean Architecture), manifests kustomize, Job de migration, documentação da Fase 3 | PHP 8.2 | diário |
+
+`apply` segue a ordem da tabela, `destroy` a inversa. Os repositórios se acoplam **só** por
+parâmetros no SSM Parameter Store (`/oficina/<env>/...`), cada um com um único dono.
+
+## Arquitetura
+
+```mermaid
+flowchart LR
+    C([Cliente]) --> GW
+
+    subgraph gateway["oficina-gateway-auth"]
+        GW[API Gateway<br/>HTTP API]
+        AUTH[Lambda auth-cpf]
+        AZ[Lambda jwt-authorizer]
+    end
+
+    subgraph cluster["oficina-infra-cluster"]
+        NLB[NLB interno]
+        subgraph eks["EKS"]
+            API[Pods oficina-api]
+        end
+    end
+
+    subgraph fundacao["oficina-infra-fundacao"]
+        RDS[(RDS MySQL)]
+        SM[Secrets Manager]
+    end
+
+    GW -- POST /auth/cpf --> AUTH
+    GW -. valida JWT .-> AZ
+    GW -- VPC Link --> NLB --> API
+    AUTH --> RDS
+    API --> RDS
+    AUTH -. JWT_SECRET .-> SM
+    API -. External Secrets .-> SM
+```
+
+- O cliente se identifica pelo CPF em `POST /auth/cpf` e recebe um JWT `customer`. O admin faz
+  login em `POST /api/auth/login` e recebe um JWT `admin`, emitido pela própria API.
+- Toda rota `/api/**` protegida passa pelo `jwt-authorizer` no gateway, e a API revalida o token.
+- A regra de negócio fica só em `oficina-api`. A máquina de estados da ordem de serviço:
+  `RECEIVED → DIAGNOSIS → AWAITING_APPROVAL → EXECUTING → FINISHED → DELIVERED`.
+
+## Documentação
+
+Fica no repositório da aplicação, em `docs/fase-3/`. Este repositório aponta para ela e não copia.
+
+| Documento | Onde |
 |---|---|
-| [`oficina-infra-database`](https://github.com/bregaldahq/oficina-infra-database) | fundação: VPC, RDS, segredos, migrations |
-| [`oficina-infra-k8s`](https://github.com/bregaldahq/oficina-infra-k8s) | cluster: EKS, add-ons, ECR, NLB interno |
-| [`oficina-lambda-auth`](https://github.com/bregaldahq/oficina-lambda-auth) | borda: Lambdas de autenticação e API Gateway |
-| [`oficina-mecanica-tech-challenge`](https://github.com/bregaldahq/oficina-mecanica-tech-challenge) | aplicação, deploy, contratos e ADRs |
+| Contratos entre repositórios (normativo) | [`CONTRATOS.md`](https://github.com/bregaldahq/oficina-api/blob/develop/docs/fase-3/CONTRATOS.md) |
+| Decisões de arquitetura | [`docs/fase-3/adr/`](https://github.com/bregaldahq/oficina-api/tree/develop/docs/fase-3/adr) |
+| RFCs | [`docs/fase-3/rfc/`](https://github.com/bregaldahq/oficina-api/tree/develop/docs/fase-3/rfc) |
+| Diagramas | [`docs/fase-3/diagramas/`](https://github.com/bregaldahq/oficina-api/tree/develop/docs/fase-3/diagramas) |
+| Contrato HTTP (OpenAPI) | [`swagger.yaml`](https://github.com/bregaldahq/oficina-api/blob/develop/swagger.yaml) |
+| Fluxos de negócio | [`DOMAIN-STORYTELLING.md`](https://github.com/bregaldahq/oficina-api/blob/develop/docs/DOMAIN-STORYTELLING.md) |
+| Modelo de dados | [`MODELO-DE-DADOS.md`](https://github.com/bregaldahq/oficina-infra-fundacao/blob/develop/docs/MODELO-DE-DADOS.md) |
+| Como funciona cada repositório, por dentro | [`AGENTS.md`](AGENTS.md) |
 
 ## Começando
 
 ```bash
-git clone https://github.com/bregaldahq/oficina-workspace.git
-cd oficina-workspace
-make setup          # baixa os quatro em repos/
+git clone https://github.com/bregaldahq/oficina-mecanica.git
+cd oficina-mecanica
+make setup          # clona os quatro repositórios em repos/
+make status         # branch, arquivos sujos e divergência de cada um
 claude              # ou o agente de sua preferência, a partir da raiz
 ```
 
-Já tem os repos clonados em outro lugar? Em vez de clonar de novo:
+Já tem os repositórios clonados em outro lugar? Em vez de clonar de novo:
 
 ```bash
 bin/ws link ~/caminho/onde/estao/os/clones
@@ -32,10 +99,10 @@ bin/ws link ~/caminho/onde/estao/os/clones
 
 | Caminho | Para quê |
 |---|---|
-| `AGENTS.md` | contexto para qualquer agente: mapa, acoplamento, convenções, regras |
+| `AGENTS.md` | contexto para qualquer agente: mapa, como cada repo funciona, acoplamento, convenções, regras |
 | `CLAUDE.md` | importa o `AGENTS.md` e lista o que é específico do Claude Code |
 | `Makefile` | atalhos: `make setup`, `make pull`, `make status`, `make prs`, `make contratos` |
-| `repos.txt` | lista de repositórios, na ordem de apply — para incluir um repo, adicione uma linha |
+| `repos.txt` | lista de repositórios, na ordem de apply. Para incluir um repo, adicione uma linha |
 | `bin/ws` | `clone`, `link`, `pull`, `status`, `prs`, `run <cmd>` em todos os repos |
 | `bin/check-contracts.py` | confere o acoplamento por SSM: consumidor sem dono, dono duplicado, parâmetro órfão |
 | `.claude/skills/` | `status-geral`, `mudanca-cross-repo`, `checar-contratos` |
@@ -44,10 +111,26 @@ bin/ws link ~/caminho/onde/estao/os/clones
 
 ## Princípios
 
-- **`repos/` não é versionado.** Cada repositório mantém o próprio Git, CI e proteção de branch;
-  o workspace só os enxerga. Nada de submodule.
-- **Uma fonte da verdade.** O contrato entre os repos continua em
-  `oficina-mecanica-tech-challenge/docs/fase-3/CONTRATOS.md`. O workspace aponta para ele, não
-  copia.
-- **Agente não muda infra.** Infra muda pelo CI de cada repo; daqui, o agente lê, edita, testa e
-  abre PR.
+- **`repos/` não é versionado.** Cada repositório mantém o próprio Git, CI e proteção de branch.
+  Este só os enxerga. Nada de submodule.
+- **Uma fonte da verdade.** O contrato entre os repositórios é o `CONTRATOS.md` da aplicação.
+  Este repositório aponta para ele, não copia.
+- **Agente não muda infra.** Infra muda pelo CI de cada repositório. Daqui, o agente lê, edita,
+  testa e abre PR.
+
+## Nomes antigos
+
+Os repositórios foram renomeados em novembro de 2026. O GitHub redireciona as URLs antigas.
+
+| Antes | Agora |
+|---|---|
+| `oficina-workspace` | `oficina-mecanica` |
+| `oficina-infra-database` | `oficina-infra-fundacao` |
+| `oficina-infra-k8s` | `oficina-infra-cluster` |
+| `oficina-lambda-auth` | `oficina-gateway-auth` |
+| `oficina-mecanica-tech-challenge` | `oficina-api` |
+
+Três coisas **continuam** com o nome antigo, de propósito: a chave do state do Terraform
+(`oficina/<nome-antigo>/<env>/terraform.tfstate`), os roles de CI na AWS
+(`oficina-gha-<nome-antigo>`) e a tag `Repo` dos recursos. Mudar qualquer uma delas exige
+migração de state, recriação de role ou um apply que troca todos os nodes do cluster.
