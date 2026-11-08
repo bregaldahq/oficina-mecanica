@@ -405,6 +405,9 @@ O passo `workflows` (actionlint) confere a sintaxe dos workflows de todos os rep
 só os repos com mudança, e `--fast` pula as migrations. O resultado vai para
 `.ws/verify/latest.json` e os logs para `.ws/verify/logs/`.
 
+Em comando encadeado com pipe, use `set -o pipefail`: sem ele, `cmd | head && próximo` segue
+mesmo com `cmd` falhando.
+
 Para um comando avulso, use `bin/ws exec <repo> <cmd>`, por exemplo
 `bin/ws exec gateway vendor/bin/phpunit --filter Jwt`. O `make test`/`make stan` do gateway
 chamam `vendor/bin/...` direto e **não funcionam** sem PHP local. O `make test` da aplicação usa
