@@ -1,25 +1,30 @@
-# Oficina Mecânica — workspace
+# Oficina Mecânica — repositório principal
 
-Este repositório não tem código de produto. Ele junta os quatro repositórios do sistema da
-Oficina Mecânica (Tech Challenge SOAT, Fase 3) para que um agente, ou uma pessoa, enxergue e
-mude o sistema inteiro de um lugar só. Os repositórios ficam em `repos/`, que não é versionado
-aqui: cada um continua com o próprio Git, as próprias branches e o próprio CI.
+Este é o repositório principal do projeto, `oficina-mecanica`, mas ele não tem código de produto.
+Ele junta os quatro repositórios do sistema da Oficina Mecânica (Tech Challenge SOAT, Fase 3)
+para que um agente, ou uma pessoa, enxergue e mude o sistema inteiro de um lugar só. Os
+repositórios ficam em `repos/`, que não é versionado aqui: cada um continua com o próprio Git, as
+próprias branches e o próprio CI.
+
+Os repositórios foram renomeados em novembro de 2026; o `README.md` tem a tabela de nomes antigos.
+PRs antigos, a chave do state do Terraform, os roles de CI (`oficina-gha-<nome-antigo>`) e a tag
+`Repo` ainda usam os nomes antigos, de propósito. Não "corrija" esses três.
 
 ## Mapa
 
 | Repositório | Papel | Stack | Muda |
 |---|---|---|---|
-| `repos/oficina-infra-database` | **Fundação**: VPC, subnets, RDS MySQL, *todos* os segredos, migrations SQL | Terraform | raríssimo |
-| `repos/oficina-infra-k8s` | **Cluster**: EKS, node group, add-ons Helm, ECR, NLB interno + target group, `ClusterSecretStore` | Terraform | ocasional |
-| `repos/oficina-lambda-auth` | **Borda**: Lambdas `auth-cpf` e `jwt-authorizer` (PHP/Bref), API Gateway, VPC Link | PHP 8.2 + Terraform | ocasional |
-| `repos/oficina-mecanica-tech-challenge` | **Aplicação**: API REST em PHP puro (DDD, Clean Architecture), `deploy/` em kustomize, Job de migration | PHP 8.2 | diário |
+| `repos/oficina-infra-fundacao` | **Fundação**: VPC, subnets, RDS MySQL, *todos* os segredos, migrations SQL | Terraform | raríssimo |
+| `repos/oficina-infra-cluster` | **Cluster**: EKS, node group, add-ons Helm, ECR, NLB interno + target group, `ClusterSecretStore` | Terraform | ocasional |
+| `repos/oficina-gateway-auth` | **Borda**: Lambdas `auth-cpf` e `jwt-authorizer` (PHP/Bref), API Gateway, VPC Link | PHP 8.2 + Terraform | ocasional |
+| `repos/oficina-api` | **Aplicação**: API REST em PHP puro (DDD, Clean Architecture), `deploy/` em kustomize, Job de migration | PHP 8.2 | diário |
 
-Ordem de `apply`: **database → k8s → lambda → app**. Ordem de `destroy`: inversa.
+Ordem de `apply`: **fundação → cluster → gateway → api**. Ordem de `destroy`: inversa.
 
 ## Fonte da verdade
 
 O documento normativo entre os repositórios é
-`repos/oficina-mecanica-tech-challenge/docs/fase-3/CONTRATOS.md`. Leia antes de qualquer mudança
+`repos/oficina-api/docs/fase-3/CONTRATOS.md`. Leia antes de qualquer mudança
 que atravesse repositórios. Em caso de divergência entre ele e uma implementação, **o documento
 vence** — corrija a implementação, ou altere o documento no mesmo conjunto de PRs.
 
@@ -44,10 +49,10 @@ Cliente ── GET /api/... + Bearer ──► API Gateway ──► Lambda jwt-
                                                                                  └─► RDS MySQL
 ```
 
-- **Rede, banco e segredos** nascem em `oficina-infra-database` e sobrevivem a tudo.
-- **Cluster, ECR e NLB** nascem em `oficina-infra-k8s` e são descartáveis.
-- **Porta de entrada e autenticação do cliente final** ficam em `oficina-lambda-auth`.
-- **Regra de negócio** fica só na aplicação, `oficina-mecanica-tech-challenge`.
+- **Rede, banco e segredos** nascem em `oficina-infra-fundacao` e sobrevivem a tudo.
+- **Cluster, ECR e NLB** nascem em `oficina-infra-cluster` e são descartáveis.
+- **Porta de entrada e autenticação do cliente final** ficam em `oficina-gateway-auth`.
+- **Regra de negócio** fica só na aplicação, `oficina-api`.
 
 Dois papéis no JWT: `customer` (token vem do `POST /auth/cpf` da Lambda) e `admin` (token vem
 do `POST /api/auth/login` da aplicação). O mesmo `JwtProvider` existe nos dois repos, copiado byte
@@ -55,7 +60,7 @@ a byte.
 
 ## Como funciona cada repo
 
-### `oficina-infra-database` — fundação
+### `oficina-infra-fundacao` — fundação
 
 **O que é.** Terraform puro (>= 1.6, AWS provider ~> 5.60) mais as migrations SQL. Primeiro a
 ser aplicado, último a ser destruído (ADR-009).
@@ -92,7 +97,7 @@ O modelo de dados está documentado em `docs/MODELO-DE-DADOS.md`.
 **Validar.** `terraform fmt -check -recursive` e `terraform init -backend=false && terraform validate`.
 Para as migrations, suba um container `mysql:8.0` e aplique os arquivos em ordem, duas vezes.
 
-### `oficina-infra-k8s` — cluster
+### `oficina-infra-cluster` — cluster
 
 **O que é.** Terraform com os providers `aws`, `kubernetes`, `helm` e `kubectl`. Os três
 últimos se autenticam via `aws eks get-token`. Lê do SSM a rede, o `db/client_sg_id` e os ARNs
@@ -129,7 +134,7 @@ dos segredos.
 **Validar.** `terraform fmt`, `terraform init -backend=false`, `terraform validate` (o CI também
 roda `tflint`).
 
-### `oficina-lambda-auth` — borda e autenticação
+### `oficina-gateway-auth` — borda e autenticação
 
 **O que é.** PHP 8.2 no runtime **Bref** (layer `php-82`) mais o Terraform do API Gateway. As
 duas Lambdas recebem o **mesmo zip** (`scripts/build-package.sh` → `build/lambda.zip`). O que muda
@@ -175,7 +180,7 @@ descubra o que mudou no `JwtProvider` e reverta. Não atualize a string sem muda
 **Validar.** Veja a tabela de validação local mais abaixo. Os ARNs dos layers (Bref, New Relic)
 em `envs/*.tfvars` envelhecem: confira a versão antes de mudar.
 
-### `oficina-mecanica-tech-challenge` — aplicação
+### `oficina-api` — aplicação
 
 **O que é.** API REST em **PHP 8.2 puro**, sem framework (ADR-001), em Clean Architecture e
 DDD. Tem Nginx + PHP-FPM numa imagem `php:8.2-fpm-bookworm` (não Alpine, porque o agente New
@@ -228,7 +233,7 @@ O contrato HTTP completo está em `swagger.yaml`.
   `TargetGroupBinding`, ConfigMaps e o **Job `oficina-migrate`**.
 - `overlays/hml` e `overlays/prod` definem namespace, réplicas, recursos e tag da imagem. O prod
   tem também um PDB.
-- O Job clona `oficina-infra-database` na ref de `deploy/base/migrations-configmap.yaml`, que o
+- O Job clona `oficina-infra-fundacao` na ref de `deploy/base/migrations-configmap.yaml`, que o
   pipeline fixa, e roda `bin/migrate.php`. O runner controla o que já rodou pela tabela
   `schema_migrations` e pula os arquivos `_demo` em produção.
 

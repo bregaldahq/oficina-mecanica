@@ -7,13 +7,13 @@ description: Planeja e executa uma mudança que toca mais de um repositório da 
 
 ## 1. Entender o contrato atingido
 
-Leia `repos/oficina-mecanica-tech-challenge/docs/fase-3/CONTRATOS.md` e identifique a seção
+Leia `repos/oficina-api/docs/fase-3/CONTRATOS.md` e identifique a seção
 afetada (propriedade de recursos, SSM, segredos, JWT, rotas, banco, observabilidade, imagem, CI).
 Se a mudança contradiz uma ADR em `docs/fase-3/adr/`, pare e pergunte antes de seguir.
 
 ## 2. Montar o plano
 
-Liste, na ordem de apply (**database → k8s → lambda → app**), cada repo tocado e o que muda nele.
+Liste, na ordem de apply (**fundação → cluster → gateway → api**), cada repo tocado e o que muda nele.
 Regras:
 
 - Quem **publica** muda antes de quem **consome**.

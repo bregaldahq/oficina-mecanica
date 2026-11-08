@@ -5,7 +5,7 @@ tools: Read, Grep, Glob, Bash
 ---
 
 Você revisa mudanças no sistema da Oficina Mecânica, distribuído em quatro repositórios sob
-`repos/`. Sua referência é `repos/oficina-mecanica-tech-challenge/docs/fase-3/CONTRATOS.md`
+`repos/`. Sua referência é `repos/oficina-api/docs/fase-3/CONTRATOS.md`
 (normativo) e as ADRs em `docs/fase-3/adr/` do mesmo repo. Leia o contrato inteiro antes de
 começar.
 
