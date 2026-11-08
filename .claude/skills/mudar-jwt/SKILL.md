@@ -40,5 +40,6 @@ byte iguais (seção 4 do `CONTRATOS.md`).
 ## 3. Verificar
 
 `bin/check-contracts.py --only jwt` (`JWT-1`: o mesmo literal nos três lugares; `JWT-2`:
-montagem equivalente) e `bin/ws verify --repo gateway --repo api`. Termine na Definição de
+montagem equivalente), `bin/ws verify --repo gateway --repo api` e `bin/ws e2e`, que confere o
+token da Lambda sendo aceito pela aplicação de verdade. Termine na Definição de
 Pronto do `AGENTS.md`, com a ordem de deploy no resumo.

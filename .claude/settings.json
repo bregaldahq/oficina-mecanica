@@ -11,6 +11,7 @@
       "Bash(bin/ws ci:*)",
       "Bash(bin/ws diff:*)",
       "Bash(bin/ws verify:*)",
+      "Bash(bin/ws e2e:*)",
       "Bash(bin/ws doctor)",
       "Bash(bin/ws statusline)",
       "Bash(bin/tooling tag)",

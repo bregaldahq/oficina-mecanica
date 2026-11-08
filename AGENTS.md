@@ -324,6 +324,7 @@ bin/ws ci [<branch>]               # último run de cada workflow; log do que fa
 bin/ws diff [--patch]              # o que mudou contra origin/develop
 bin/ws grep -E 'padrão'            # busca nos quatro repos (só arquivos versionados ou novos)
 bin/ws verify [--changed] [--fast] # o que o pr.yml roda, local e sem AWS (ver "Validação local")
+bin/ws e2e                         # ponta a ponta entre os repos, sem AWS: migrations, app, Lambdas, JWT
 bin/ws exec <repo> <cmd...>        # comando na imagem de ferramentas (PHP, Composer, Terraform...)
 bin/ws branch <nome> <repo...>     # mesma branch nos repos indicados, a partir de origin/develop
 bin/ws isolate <b> <repo...>       # worktrees próprios desta sessão (sessões paralelas)
@@ -408,6 +409,12 @@ só os repos com mudança, e `--fast` pula as migrations. O resultado vai para
 Em comando encadeado com pipe, use `set -o pipefail`: sem ele, `cmd | head && próximo` segue
 mesmo com `cmd` falhando.
 
+**`bin/ws e2e`** sobe um MySQL, aplica as migrations da fundação pelo runner da aplicação, sobe
+a aplicação e usa as Lambdas do gateway como classes para conferir o caminho inteiro: o token
+da `auth-cpf` aceito pela aplicação, o `jwt-authorizer`, a matriz de autorização e o webhook.
+Leva cerca de 30 s e usa a branch em disco de cada repo. Ele pega quebras entre repos que os
+testes de cada repo não pegam.
+
 Para um comando avulso, use `bin/ws exec <repo> <cmd>`, por exemplo
 `bin/ws exec gateway vendor/bin/phpunit --filter Jwt`. O `make test`/`make stan` do gateway
 chamam `vendor/bin/...` direto e **não funcionam** sem PHP local. O `make test` da aplicação usa
@@ -462,7 +469,8 @@ Comandos do próprio Claude Code que encaixam no fluxo:
 Uma mudança só está pronta, e só sai em PR, quando:
 
 1. `bin/ws verify --changed` termina em `OK`. Use `--image` se mexeu em `Dockerfile` ou
-   `docker/` da app.
+   `docker/` da app. Se a mudança atravessa repos (JWT, rotas, autenticação, migrations,
+   segredos), `bin/ws e2e` também termina sem falha.
 2. `bin/check-contracts.py` não tem `erro`. `aviso` novo de documento pede adendo no
    `CONTRATOS.md`.
 3. O subagente `guardiao-de-contratos` não tem achado grave sobre o diff (`bin/ws diff --patch`).

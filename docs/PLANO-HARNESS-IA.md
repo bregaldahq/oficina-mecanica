@@ -36,7 +36,7 @@ qualquer sessão (**corrigido**, ver o Andamento), conseguir **verificar** o que
 | 5 | Comandos: skills e subagentes | cada mudança típica vira um comando seu | ✅ |
 | 6 | A sessão interativa | menos interrupção, status visível, sessões paralelas | ✅ |
 | 7 | Medir e melhorar o harness | saber se cada mudança no harness ajudou | ✅ (falta a rodada de referência) |
-| 8 | Avançado (opcional) | e2e entre repos sem AWS, MCP | sob demanda |
+| 8 | Avançado (opcional) | e2e entre repos sem AWS, MCP | ✅ e2e; MCP descartado |
 
 ## Andamento
 
@@ -53,6 +53,7 @@ qualquer sessão (**corrigido**, ver o Andamento), conseguir **verificar** o que
 | 2026-11-07 | Achados ao rodar em `develop` | Falso positivo do `NOME-1` com comentário no fim da linha da tag (corrigido, com teste). O `deploy.yml` da fundação em `develop` é YAML inválido (achado 21): a correção ficou na branch local **`fix/deploy-yml-invalido`** (sem push). O passo do actionlint no `verify` passou a ser `workflows`, bloqueante e sem o shellcheck embutido. |
 | 2026-11-07 | 5 Comandos | 12 skills novas: `verificar`, `nova-migration`, `novo-endpoint`, `mudar-jwt`, `novo-parametro-ssm`, `novo-segredo`, `corrigir-ci`, `abrir-prs`, `revisar-pr`, `release`, `atualizar-dependencias` e `registrar-licao`. Mais `templates/pr-body.md` e 3 subagentes novos: `verificador` (haiku), `revisor-ddd` e `revisor-terraform`. Cada receita cita os arquivos e padrões reais (conferidos: o padrão `PREPARE`/`EXECUTE` do `002`, `requireRole('customer', 'admin')`, `RequestValidator`, a IRSA do ESO). Definição de Pronto e catálogo de comandos no `AGENTS.md`. `tests/test_contexto.py` confere o frontmatter, que skills e subagentes citados existem e que os hooks do settings existem e são executáveis. |
 | 2026-11-08 | 0.6 AWS como código | O ambiente AWS foi derrubado, e é por isso que o OIDC falha (achado 16). `bootstrap/aws/` tem tudo o que a conta precisa antes de qualquer CI: bucket `oficina-tfstate-<sufixo>` e tabela `oficina-tflock`, provider OIDC do GitHub, um role por repo (nome antigo, `sub` com o nome novo, só PR, environments e `develop`/`main`) e o role `oficina-agent-readonly` (ReadOnlyAccess, sem segredo, KMS nem state). Mais o `github.sh` (secrets e environments; só executa com `--apply` e confirmação no terminal) e o README com a sequência para reerguer o sistema. `AWS_PROFILE=oficina-readonly` no settings. Validado com `terraform validate`; o `verify` do workspace roda o bootstrap e o `tests/test_bootstrap.py` amarra os nomes ao contrato. **Não aplicado:** é com você, com credencial de administrador. |
+| 2026-11-08 | 8.1 E2E local | `bin/ws e2e` (`bin/e2e.py` + `tools/e2e/lambda.php`) faz 17 checagens em cerca de 30 s, sem AWS: MySQL 8.0, migrations da fundação pelo `bin/migrate.php` da app (duas vezes), app em `php -S`, login do admin, `auth-cpf` (200/400/404), `jwt-authorizer` (aceita o token do cliente e o do admin, recusa o adulterado), token da Lambda aceito pela app, 403 de cliente em rota de admin, webhook com token errado. O `.env` da app é coberto por `/dev/null`, e o e2e não lê nem usa seus valores. Mutação conferida: trocar `role` para `cliente` na `auth-cpf` derruba 2 checagens, e nenhum teste de contrato pegaria isso. 8.2 (MCP do Terraform) ficou de fora de propósito: o `terraform validate` do `verify` já pega argumento inválido, e um MCP a mais custaria contexto em toda sessão. |
 | 2026-11-08 | Repos de produto (branches locais, **sem push**) | Correções prontas e verificadas, uma branch por assunto (ver a decisão 6 para a lista e a ordem de merge): lockfile versionado na fundação e no cluster (achado 17); rota do webhook no gateway + adendo 7 do `CONTRATOS.md` na app (achados 19 e 20); Terraform 1.9.8 e cache do Composer pelo lock no gateway (achado 12); `make test`/`make stan` do gateway sem PHP local e `php.sh` da app que constrói a própria imagem (1.1); cache do php-cs-fixer fora do Git (achado 18); `php.sh`/`composer.sh` executáveis (achado 22). Com tudo isso em `develop`, o `check-contracts` fica com 0 erros e 0 conhecidos. |
 | 2026-11-08 | 6 Sessão interativa | Catálogo de comandos no `AGENTS.md` (6.1). `bin/ws statusline` (6.2): branch de cada repo, `*` para mudança não commitada e o último `verify`, em 45 ms e sem rede, configurado em `statusLine`. 6.3 e 6.4 foram cobertos pelas permissões das Fases 0 e 1 e pelo `ws isolate`. |
 | 2026-11-08 | 7 Medir | 8 tarefas-canário em `evals/`, com `bin/ws eval list/setup/grade/clean`. O `guard-bash` registra negações e confirmações em `.ws/hooks/guard.log`, o que serve de métrica e de prova na tarefa 08. Notas validadas: as tarefas com defeito plantado (05, 06, 07) reprovam antes da correção e passam depois; a 03 passa com a primeira etapa certa do rename; a 08 reprova quando há tentativa no log; as de construção (01, 02, 04) reprovam sem nada feito. Seção "Como evoluir este harness" no `AGENTS.md`. **Falta a primeira rodada de referência com um agente de verdade, numa sessão sua** (ver o 7.2). |
@@ -662,7 +663,7 @@ deveria cair, e a mesma lição não deveria aparecer duas vezes.
 
 ---
 
-### Fase 8 — Avançado (opcional, sob demanda)
+### Fase 8 — Avançado · 8.1 ✅ feito; 8.2 descartado (ver o Andamento); 8.3 não recomendado
 
 | Item | O que é | Valor | Custo |
 |---|---|---|---|
@@ -681,7 +682,7 @@ deveria cair, e a mesma lição não deveria aparecer duas vezes.
 | depois da decisão 6 | PRs nos repos de produto: `chore/agents-md` (4 repos) e `fix/deploy-yml-invalido` (fundação), já prontos localmente; 1.1, 1.3 e achados 17 a 20, a fazer | pendente |
 | depois do merge dos `chore/agents-md` | 4.2: enxugar o `AGENTS.md` do workspace | pendente |
 | depois do merge desta branch | `bin/ws hooks install`; rodada de referência das tarefas-canário (7.2) | pendente |
-| sob demanda | Fase 8 (e2e local entre repos, MCP do Terraform) | não iniciada |
+| 2026-11-08 | Fase 8.1 (e2e local) | ✅ |
 
 ## 5. Decisões que dependem de você
 

@@ -40,5 +40,6 @@ Siga uma rota parecida que já existe (por exemplo `GET /api/service-orders/me`)
 
 ## 4. Verificar
 
-`bin/ws verify --changed` e `bin/check-contracts.py --only rotas` (`ROTA-1` a `ROTA-4`). Termine
+`bin/ws verify --changed` e `bin/check-contracts.py --only rotas` (`ROTA-1` a `ROTA-4`). Para
+rota pública ou mudança de autorização, `bin/ws e2e` também. Termine
 na Definição de Pronto do `AGENTS.md`.

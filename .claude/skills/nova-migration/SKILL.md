@@ -54,4 +54,5 @@ Mostre o plano e espere o ok.
 
 `bin/ws verify --repo fundacao` (as migrations rodam duas vezes num MySQL 8.0) e
 `bin/ws verify --repo api`. `bin/check-contracts.py --only migrations` aponta coluna usada pelo
-PDO e ausente no schema dos testes. Termine na Definição de Pronto do `AGENTS.md`.
+PDO e ausente no schema dos testes. `bin/ws e2e` aplica as migrations pelo runner da
+aplicação, duas vezes, e sobe a aplicação em cima do schema. Termine na Definição de Pronto do `AGENTS.md`.

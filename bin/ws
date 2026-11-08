@@ -14,6 +14,7 @@
 #   bin/ws diff [--patch]           o que mudou contra origin/develop em cada repo
 #   bin/ws grep <padrão...>         git grep em todos os repos (só arquivos versionados ou novos)
 #   bin/ws verify [opções]          o que o pr.yml roda, local e sem AWS (bin/ws verify --help)
+#   bin/ws e2e [--keep]             ponta a ponta: MySQL + migrations + app + Lambdas, sem AWS
 #   bin/ws exec <repo> <cmd...>     roda o comando na imagem de ferramentas, dentro do repo
 #   bin/ws branch <nome> <repo...>  mesma branch nos repos indicados, a partir de origin/develop
 #   bin/ws isolate <b> <repo...>    worktrees próprios desta sessão para os repos indicados
@@ -585,6 +586,7 @@ case "${1:-}" in
   diff)    shift; cmd_diff "$@" ;;
   grep)    shift; cmd_grep "$@" ;;
   verify)  shift; exec python3 "$ROOT/bin/verify.py" "$@" ;;
+  e2e)     shift; exec python3 "$ROOT/bin/e2e.py" "$@" ;;
   exec)    shift; cmd_exec "$@" ;;
   branch)  shift; cmd_branch "$@" ;;
   isolate) shift; cmd_isolate "$@" ;;
