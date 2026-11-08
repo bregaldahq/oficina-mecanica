@@ -5,6 +5,9 @@
 # Resultados e logs de bin/ws verify e bin/ws ci
 .ws/
 
+# Worktrees das sessões do app desktop
+.claude/worktrees/
+
 # Configuração pessoal do Claude Code
 .claude/settings.local.json
 

@@ -5,7 +5,9 @@
 # Instalado por `bin/ws hooks install` (core.hooksPath).
 set -euo pipefail
 
-while read -r _local_ref _local_sha remote_ref _remote_sha; do
+pushed=()
+while read -r _local_ref local_sha remote_ref _remote_sha; do
+  [[ "$local_sha" =~ ^0+$ ]] || pushed+=("$local_sha")
   case "$remote_ref" in
     refs/heads/main|refs/heads/develop)
       echo "pre-push: push direto em ${remote_ref#refs/heads/} é proibido; abra um PR" >&2
@@ -21,6 +23,7 @@ ws="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 name="$(basename "$(git remote get-url origin 2>/dev/null || git rev-parse --show-toplevel)" .git)"
 if [[ "$name" == oficina-mecanica ]]; then
   name=workspace
+  ws="$(git rev-parse --show-toplevel)"  # o workspace verifica a própria árvore que sobe
 elif ! grep -qE "^${name}[[:space:]]" "$ws/repos.txt"; then
   exit 0
 fi
@@ -30,5 +33,18 @@ top="$(git rev-parse --show-toplevel)"
 if [[ "$(basename "$top")" == "$name" ]]; then
   export OFICINA_REPOS_DIR="${top%/*}"
 fi
+# O verify olha a árvore em disco: só vale se é ela que está subindo.
+head="$(git rev-parse HEAD)"
+for sha in ${pushed[@]+"${pushed[@]}"}; do
+  if [[ "$sha" != "$head" ]]; then
+    echo "pre-push: o que sobe ($sha) não é o que está em disco ($head); verificação local pulada." >&2
+    echo "          Para verificar, rode bin/ws verify num bin/ws isolate da branch." >&2
+    exit 0
+  fi
+done
+# Dentro de um hook o Git exporta GIT_DIR e afins; herdados, fariam todo `git -C <outro repo>` do
+# verify olhar para este repo.
+# shellcheck disable=SC2046
+unset $(git rev-parse --local-env-vars)
 echo "pre-push: bin/ws verify --repo $name --fast" >&2
 "$ws/bin/ws" verify --repo "$name" --fast >&2

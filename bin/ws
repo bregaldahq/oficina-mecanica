@@ -406,12 +406,13 @@ cmd_doctor() {
     for branch in main develop; do
       prot="$(gh api "repos/$OWNER/$name/branches/$branch/protection" \
         --jq '"\(.enforce_admins.enabled) \(.required_status_checks.contexts // [] | length)"' 2>/dev/null || echo "?")"
-      [[ "$prot" =~ ^true\ [1-9] ]] || weak+=("$branch")
+      # Só os checks: com review obrigatório, enforce_admins impede o único dev de mergear.
+      [[ "$prot" =~ \ [1-9] ]] || weak+=("$branch")
     done
     if (( ${#weak[@]} == 0 )); then
-      doctor_line ok "$name: main e develop com enforce_admins e checks obrigatórios"
+      doctor_line ok "$name: main e develop com checks obrigatórios"
     else
-      doctor_line aviso "$name: ${weak[*]} sem enforce_admins ou sem checks obrigatórios (decisão 4 do plano)"
+      doctor_line aviso "$name: ${weak[*]} sem checks obrigatórios (decisão 4 do plano)"
     fi
   done
 

@@ -234,6 +234,17 @@ class GitHooksTest(unittest.TestCase):
         return subprocess.run([str(ROOT / "githooks" / "pre-push"), "origin", "url"], input=line, text=True,
                               capture_output=True, env={**os.environ, "OFICINA_PRE_PUSH_VERIFY": "0"}).returncode
 
+    def test_pre_push_nao_verifica_arvore_que_nao_esta_subindo(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run(["git", "init", "-q", tmp], check=True)
+            subprocess.run(["git", "-C", tmp, "remote", "add", "origin", "https://github.com/o/oficina-infra-cluster.git"], check=True)
+            subprocess.run(["git", "-C", tmp, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x"], check=True)
+            line = "refs/heads/outra " + "a" * 40 + " refs/heads/feat/x " + "0" * 40 + "\n"
+            out = subprocess.run([str(ROOT / "githooks" / "pre-push"), "origin", "url"], input=line, text=True,
+                                 capture_output=True, cwd=tmp)
+            self.assertEqual(out.returncode, 0)
+            self.assertIn("verificação local pulada", out.stderr)
+
     def test_pre_push(self):
         self.assertNotEqual(self.pre_push("refs/heads/main"), 0)
         self.assertNotEqual(self.pre_push("refs/heads/develop"), 0)
