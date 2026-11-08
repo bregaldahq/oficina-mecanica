@@ -121,6 +121,7 @@ bin/ws link ~/caminho/onde/estao/os/clones
 | `tests/` | testes do checker, dos hooks e do contexto (`python3 -m unittest discover -s tests`) |
 | `evals/` | tarefas-canário com nota determinística, para medir mudanças no harness (`bin/ws eval`) |
 | `templates/pr-body.md` | corpo dos PRs abertos pelo `/abrir-prs` |
+| `bootstrap/aws/` | o que a conta AWS precisa antes de qualquer CI: bucket e lock do state, OIDC do GitHub, roles de CI e o role só-leitura do agente. Você aplica uma vez, à mão (ver o README dele) |
 | `docs/PLANO-HARNESS-IA.md` | plano de evolução do harness de IA |
 
 ## Princípios

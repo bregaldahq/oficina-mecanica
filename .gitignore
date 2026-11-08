@@ -9,3 +9,8 @@
 .claude/settings.local.json
 
 __pycache__/
+
+# bootstrap/aws: state local (guarde-o fora do Git) e cache do terraform init
+bootstrap/aws/.terraform/
+bootstrap/aws/terraform.tfstate*
+bootstrap/aws/*.tfvars

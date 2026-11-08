@@ -280,6 +280,7 @@ O contrato HTTP completo está em `swagger.yaml`.
 | escala, recursos ou réplicas | app (`deploy/overlays/<env>`) |
 | tamanho ou tipo de node, versão do EKS | infra-k8s (`envs/<env>.tfvars`) |
 | dashboards e alertas | app (`docs/fase-3/newrelic/`) |
+| conta AWS: bucket e lock do state, OIDC, roles de CI, role só-leitura do agente | este repo (`bootstrap/aws/`), aplicado à mão pelo usuário, nunca pelo agente |
 
 ## Como os repositórios se acoplam
 
@@ -496,3 +497,7 @@ Os PRs saem com `/abrir-prs`, e só quando o usuário pedir.
    e em qual branch está — cada um é um Git separado.
 6. Não leia nem imprima `.env` nem saída de `get-secret-value`. Os `envs/*.tfvars` são
    configuração versionada, sem segredo, e podem ser lidos.
+7. Na AWS, as sessões do Claude Code usam o perfil `oficina-readonly` (`AWS_PROFILE` no
+   `.claude/settings.json`; o role vem de `bootstrap/aws/`). Ele lê a conta, mas não lê segredo,
+   `kms:Decrypt` nem o bucket de state. Se precisar de mais, peça ao usuário; não troque de
+   perfil.

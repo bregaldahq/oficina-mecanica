@@ -187,8 +187,11 @@ STEPS: dict[str, list[Step]] = {
         Step("workflows", ACTIONLINT, "fora do CI: workflow inválido nem carrega no GitHub"),
     ],
     WORKSPACE: [
-        Step("shellcheck", tool("shellcheck -x bin/ws bin/tooling .claude/hooks/*.sh githooks/* evals/lib.sh evals/*/*.sh"), "-"),
+        Step("shellcheck", tool("shellcheck -x bin/ws bin/tooling .claude/hooks/*.sh githooks/* evals/lib.sh evals/*/*.sh bootstrap/aws/github.sh"), "-"),
         Step("python", python_compiles, "-"),
+        Step("bootstrap", tool("cd bootstrap/aws && terraform fmt -check -recursive -diff"
+                               " && terraform init -backend=false -input=false -no-color >/dev/null"
+                               " && terraform validate -no-color"), "bootstrap/aws (fmt e validate)"),
         Step("testes", unittests, "tests/ (checker de contratos)"),
         Step("contratos", contracts, "bin/check-contracts.py"),
     ],

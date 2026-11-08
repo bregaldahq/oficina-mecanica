@@ -1,4 +1,7 @@
 {
+  "env": {
+    "AWS_PROFILE": "oficina-readonly"
+  },
   "permissions": {
     "allow": [
       "Bash(bin/ws status)",
