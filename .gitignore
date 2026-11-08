@@ -2,6 +2,9 @@
 # também o symlink que o hook ensure-repos.sh cria nos worktrees.
 /repos
 
+# Resultados e logs de bin/ws verify e bin/ws ci
+.ws/
+
 # Configuração pessoal do Claude Code
 .claude/settings.local.json
 

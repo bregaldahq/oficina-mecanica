@@ -29,7 +29,7 @@ qualquer sessão (**corrigido**, ver o Andamento), conseguir **verificar** o que
 | Fase | Tema | Por quê nesta posição | Esforço |
 |---|---|---|---|
 | 0 | Consertar a base | sem isso, todo o resto roda às cegas | ½ dia (metade feita) |
-| 1 | Verificação local num comando | autonomia sem verificação é aposta | 1–2 dias |
+| 1 | Verificação local num comando | autonomia sem verificação é aposta | ✅ no workspace; PRs nos repos pendentes |
 | 2 | Checagem de contrato completa | o maior risco do sistema está *entre* os repos | 2 dias |
 | 3 | Hooks e guardrails | regra escrita vira regra executada; toda sessão termina verificada | 1 dia |
 | 4 | Contexto em camadas | contexto certo, na hora certa, mais barato | 1 dia |
@@ -46,6 +46,8 @@ qualquer sessão (**corrigido**, ver o Andamento), conseguir **verificar** o que
 | 2026-11-07 | 0.4 Busca | `bin/ws grep <padrão>` (git grep nos 4 repos, só arquivos versionados ou novos, sem duplicatas). Seções "Como buscar" e "Sessões em worktree" no `AGENTS.md`. |
 | 2026-11-07 | 0.5 Permissões | `.claude/settings.json`: saíram `git -C repos/*` e `git branch:*`; entraram subcomandos git de leitura; `ask` para push, `reset --hard`, `clean`, `restore`, `branch -D`, `stash drop` e `gh pr create`; `deny` ampliado (`kubectl`/`helm`/`aws` mutantes, `terraform state`/`import`, `gh pr merge`, `gh api -X`, force push, push em `main`/`develop`, leitura de `.env` e `*.tfstate`). |
 | 2026-11-07 | 2 (texto) | `AGENTS.md` deixou de dizer que o `JwtProvider` é "cópia byte a byte": o que é idêntico é o token. |
+| 2026-11-07 | 1 Verificação local | `tooling/Dockerfile` + `bin/tooling`: imagem com PHP 8.2, Composer 2.7, Terraform 1.9.8, tflint, kustomize 5.4.3, actionlint e shellcheck. `bin/ws verify` (`bin/verify.py`): os passos do `pr.yml` dos 4 repos em paralelo, incluindo as migrations duas vezes num MySQL 8.0, em **~25 s**, com `.ws/verify/latest.json`. Também `bin/ws exec`, `context`, `ci`, `diff`, `prs --branch`, `branch`, `isolate` e `doctor`. Testado: tudo verde nos 4 repos; defeito plantado (`terraform fmt`) vira vermelho com o diff; `isolate`/`--rm` ida e volta; nenhum arquivo dos repos fica alterado. |
+| 2026-11-07 | 5.1 (antecipado) | Skill `status-geral` usava `gh run list --branch`, que não existe no `gh` 2.4 desta máquina: passou a usar `bin/ws context` e `bin/ws ci`. `mudanca-cross-repo` passou a usar `ws branch`/`isolate`/`verify`/`diff`/`prs --branch`. `AGENTS.md`, `README` e `Makefile` (`make verify`, `make doctor`) atualizados. |
 
 ---
 
@@ -73,15 +75,18 @@ qualquer sessão (**corrigido**, ver o Andamento), conseguir **verificar** o que
 | 4 | **P0** | Trabalho local não publicado | `oficina-api` tem 2 commits fora de qualquer remoto: `5e25782 wip: estado local antes de sincronizar…` e `91d1ad1 test(notifications)…`. | Qualquer reorganização de clones pode perder esse trabalho. | aberto (decisão 1) |
 | 5 | **P0** | Buraco de permissão | O allow `Bash(git -C repos/*)` liberava `push --force`, `reset --hard` e `clean -fdx`, e `Bash(git branch:*)` liberava `branch -D`. O deny `git push --force:*` não casava com `git -C …`. `kubectl` só tinha `apply`/`delete` negados. Nada para `helm`, `aws … delete-*`, `--with-decryption`, `gh pr merge` nem `gh api -X`. `Read(**/.env)` não impedia `cat .env`, e `repos/oficina-api/.env` existe. | Uma alucinação ou uma prompt injection vira dano real. | ✅ settings corrigido; o hook da Fase 3 fecha as formas que regra por padrão não pega |
 | 6 | P1 | Merge não depende do CI | A proteção da `main` da app tem `required_status_checks: null` e `enforce_admins: false`. | CI vermelho não bloqueia merge, e seu token (admin) passa por cima. | aberto (decisão 4) |
-| 7 | P1 | Validação local não funciona como o `AGENTS.md` descreve | `make test`/`make stan` do gateway chamam `vendor/bin/phpunit` direto, e não há PHP. `make k8s-render` precisa de `kubectl` (ausente, assim como `kustomize`, `tflint`, `actionlint`, `shellcheck` e o cliente `mysql`). `scripts/php.sh` usa a imagem `oficina-php:8.2`, que nenhum alvo constrói. `make test` da app exige `make up` (compose + `.env` + MySQL), embora os testes rodem em SQLite. | O agente não prova que a mudança funciona: pede permissão a cada passo ou pula a verificação. | aberto (Fase 1) |
-| 8 | P1 | Não há comando único de verificação nem saída para máquina | O agente monta a sequência por repo a partir de uma tabela em prosa. | Verificação inconsistente, falha difícil de resumir. | aberto (Fase 1) |
+| 7 | P1 | Validação local não funciona como o `AGENTS.md` descreve | `make test`/`make stan` do gateway chamam `vendor/bin/phpunit` direto, e não há PHP. `make k8s-render` precisa de `kubectl` (ausente, assim como `kustomize`, `tflint`, `actionlint`, `shellcheck` e o cliente `mysql`). `scripts/php.sh` usa a imagem `oficina-php:8.2`, que nenhum alvo constrói. `make test` da app exige `make up` (compose + `.env` + MySQL), embora os testes rodem em SQLite. | O agente não prova que a mudança funciona: pede permissão a cada passo ou pula a verificação. | ✅ no workspace (`bin/ws verify`, `bin/ws exec`); os Makefiles dos repos seguem como estão (1.1) |
+| 8 | P1 | Não há comando único de verificação nem saída para máquina | O agente monta a sequência por repo a partir de uma tabela em prosa. | Verificação inconsistente, falha difícil de resumir. | ✅ |
 | 9 | P1 | Quase nenhum hook | Só o `SessionStart` novo. | Nada formata, nada bloqueia de verdade, nada obriga a verificar antes de encerrar. | aberto (Fase 3) |
 | 10 | P1 | Repos de produto sem `AGENTS.md`/`CLAUDE.md` | Nenhum dos quatro tem. Todo o contexto (20 KB) carrega inteiro em toda sessão. O `.gitignore` da app ignora `.claude/` inteiro. | Sessão aberta direto num repo não sabe nada; toda sessão paga 20 KB de contexto. | aberto (Fase 4) |
 | 11 | P1 | Checagem de contrato só cobre SSM | A skill `checar-contratos` faz à mão o token do JWT, as rotas públicas, o `ClusterSecretStore`, as chaves dos segredos e o RBAC. | A checagem depende de o agente lembrar. | aberto (Fase 2); texto do JWT ✅ |
 | 12 | P2 | Drift entre os CIs | Terraform `1.9.5` no gateway e `1.9.8` nos outros; `tflint` com `continue-on-error`; cache do Composer do gateway pela chave `composer.json`. | Comportamento diferente entre repos. | aberto (1.3) |
-| 13 | P2 | `gh` 2.4.0, de 2022 | `gh --version`. | Falta `--json` em `gh pr checks` e em campos de `gh run`. | aberto (1.1) |
+| 13 | P2 | `gh` 2.4.0, de 2022 | `gh --version`. Não tem `gh run list --branch`, e a skill `status-geral` dependia disso. | O passo de CI da skill nunca funcionou nesta máquina. | ✅ contornado (`bin/ws ci` usa a API REST); atualizar o `gh` continua recomendado (`bin/ws doctor` avisa) |
 | 14 | P2 | Memória vazia e nenhum ciclo de aprendizado | `memory/` vazio. | O erro corrigido hoje volta amanhã. | aberto (4.6, 7.3) |
 | 15 | P2 | Placeholders que o pipeline substitui | O `deploy.yml` faz `sed` em `TARGET_GROUP_ARN_PLACEHOLDER` e `APP_IMAGE_PLACEHOLDER` dentro de `deploy/base/`. | Um agente que "conserte" o placeholder quebra o deploy em silêncio. | aberto (2, 3.3, 4.3) |
+| 16 | **P0** | CI que usa AWS está quebrado em `develop` | `bin/ws ci develop`: o `Deploy` da app (2026-11-08) e o `PR` do cluster (`terraform plan`) falham com `Could not assume role with OIDC: Not authorized to perform sts:AssumeRoleWithWebIdentity`. Os roles `oficina-gha-*` são criados fora destes repos. Hipótese: a policy de confiança ainda exige `repo:bregaldahq/<nome-antigo>:*` no `sub`, e o token do GitHub passou a trazer o nome novo depois da renomeação. Para conferir: `aws iam get-role --role-name oficina-gha-oficina-mecanica-tech-challenge --query Role.AssumeRolePolicyDocument`. | Nenhum deploy nem plan funciona; um agente corrigindo CI não tem como resolver isso. | aberto (é com você: IAM fora dos repos) |
+| 17 | P2 | Lockfile do Terraform não versionado | A fundação e o cluster têm `.terraform.lock.hcl` no `.gitignore`; só o gateway versiona. | Cada run de CI resolve os providers de novo: o plan de hoje pode usar outro provider que o de ontem. | aberto (PR na fundação e no cluster, se você quiser) |
+| 18 | P2 | Cache do php-cs-fixer versionado | `.php-cs-fixer.cache` está no Git da app; o dry-run o reescreve. | Sujeira em todo `make lint`. O `verify` usa `--using-cache=no`. | aberto (PR pequeno na app) |
 
 ---
 
@@ -194,101 +199,106 @@ guarda de verdade é o hook da Fase 3.
 
 ---
 
-### Fase 1 — Verificação local num comando · 1–2 dias
+### Fase 1 — Verificação local num comando · ✅ feita no workspace
 
-**Objetivo:** `bin/ws verify` roda, sem AWS e com só Docker instalado, exatamente o que o
-`pr.yml` de cada repo roda, com saída legível por humano e por máquina.
+**Objetivo:** `bin/ws verify` roda, sem AWS e com só Docker instalado, o que o `pr.yml` de cada
+repo roda, com saída legível por humano e por máquina.
 
-#### 1.1 Imagem de ferramentas `oficina-tooling`
+**Pendente, porque mexe nos repos de produto (PR):**
 
-- `tooling/Dockerfile` no workspace. As versões são `ARG`s com o mesmo valor do CI:
+- a parte dos repos em 1.1 (Makefile do gateway e `php.sh` da app);
+- 1.3 (o CI chamando os mesmos scripts);
+- os achados 17 e 18.
 
-  | Ferramenta | Versão | Fonte da versão |
-  |---|---|---|
-  | PHP CLI + `pdo_sqlite`, `pdo_mysql`, `mbstring` | 8.2 | `pr.yml` da app e do gateway |
-  | Composer | 2.7 | `scripts/composer.sh` |
-  | Terraform | 1.9.8 (o gateway vai para 1.9.8, ver 1.3) | `pr.yml` dos repos IaC |
-  | tflint | a do `setup-tflint@v4` | `pr.yml` do cluster |
-  | kustomize | 5.4.3 | `deploy.yml` da app |
-  | actionlint, shellcheck, cliente MySQL 8.0, jq, python3 | — | — |
-  | `gh` recente | ≥ 2.60 | resolve o problema 13 |
+#### 1.1 Imagem de ferramentas · ✅
 
-- `bin/ws tooling` constrói a imagem com tag igual ao hash do Dockerfile. O `verify` a constrói
-  sozinho se ela faltar.
-- `bin/ws exec <repo> <cmd…>`:
-  `docker run --rm -u $(id -u) -v <repo>:/w -w /w -v ~/.cache/composer:/tmp/composer oficina-tooling <cmd>`.
-- PRs nos repos de produto (branch `ci/verificacao-local`):
-  - **app**: `scripts/php.sh` constrói `oficina-php:8.2` a partir de `scripts/Dockerfile.tooling`
-    se faltar. Novo alvo `make test-local`, que roda o phpunit sem compose.
-  - **gateway**: `make test`, `make stan` e `make validate` rodam em container.
+`tooling/Dockerfile`, com as versões em `ARG`, e `bin/tooling` (`tag`, `image`, `build`,
+`run <dir> <cmd>`). A tag é o hash do Dockerfile, então mudar uma versão gera imagem nova. O
+build leva cerca de 1 min, só na primeira vez. Nenhuma credencial entra no container: nem
+`~/.aws` nem `~/.config/gh`.
 
-#### 1.2 `bin/ws verify` e os subcomandos novos
+| Ferramenta | Versão | Fonte da versão |
+|---|---|---|
+| PHP CLI 8.2 (`pdo_mysql`, `pdo_sqlite`, `mbstring`) | 8.2 | `pr.yml` da app e do gateway |
+| Composer | 2.7 | `scripts/composer.sh` da app |
+| Terraform | 1.9.8 | `pr.yml` da fundação e do cluster (o gateway ainda usa 1.9.5) |
+| tflint | 0.53.0 | `pr.yml` do cluster (lá sem versão fixa) |
+| kustomize | 5.4.3 | `deploy.yml` da app |
+| actionlint, shellcheck | 1.7.1, 0.9.0 | não estão no CI |
 
-**Passos por repo.** Cada passo espelha um step do CI.
+O `gh` não entra na imagem, porque roda no host, com a sua autenticação. O `doctor` avisa que
+ele está velho.
 
-| Repo | id do passo | O que roda | Espelha |
-|---|---|---|---|
-| fundação | `tf-fmt` · `tf-validate` · `tflint` | `terraform fmt -check -recursive`, `init -backend=false && validate`, `tflint --recursive` | `pr.yml` (validate) |
-| fundação | `sql-lint` | grep de `CREATE DATABASE`, `USE` e `DELIMITER` | `pr.yml` (sql-lint) |
-| fundação | `migrations-2x` | `mysql:8.0` efêmero, aplica tudo duas vezes, confere os 7 status | `pr.yml` (sql-lint) |
-| cluster | `tf-fmt` · `tf-validate` · `tflint` | idem | `pr.yml` |
-| gateway | `phpunit-contract` · `phpunit` · `phpstan` | `phpunit --testsuite contract`, `phpunit`, `phpstan analyse` | `pr.yml` (php) |
-| gateway | `tf-fmt` · `tf-validate` | idem | `pr.yml` (terraform) |
-| app | `cs-fixer` · `phpstan` · `phpunit` | `php-cs-fixer fix --dry-run --diff`, `phpstan`, `phpunit` (SQLite, sem compose) | `pr.yml` (quality) |
-| app | `kustomize` | `kustomize build deploy/overlays/{hml,prod}` | `pr.yml` (manifests) |
-| app | `image` (só com `--image`) | `docker build --target production` + `php -m \| grep newrelic` | `pr.yml` (image) |
-| workspace | `shellcheck` · `actionlint` · `contratos` | `bin/ws`, hooks, workflows dos 4 repos, `check-contracts.py` | — |
+**Pendente (PR nos repos):**
 
-**Flags:**
+- **gateway:** `make test` e `make stan` em container;
+- **app:** o `scripts/php.sh` constrói a própria imagem se ela faltar.
 
-- `--repo <r>`;
-- `--changed`: só repos com diff contra `origin/develop` ou com arquivos sujos;
-- `--fast`: pula `migrations-2x` e `image`;
-- `--json`.
+O `bin/ws exec` já cobre os dois casos.
 
-**Saída:**
+#### 1.2 `bin/ws verify` e os subcomandos · ✅
 
-- uma tabela curta, mais as últimas 40 linhas do log de cada passo que falhou;
-- `.ws/verify/latest.json` (schema no Apêndice C) e logs em `.ws/verify/logs/<repo>-<passo>.log`;
-- exit code 0 ou 1;
-- `.ws/` no `.gitignore`.
+**Passos.** Cada passo espelha um step do CI. `bin/verify.py` roda os repos em paralelo.
 
-**Subcomandos novos do `bin/ws`:**
+| Repo | Passos | Observação |
+|---|---|---|
+| fundação | `tf-fmt`, `tf-validate`, `sql-lint`, `migrations-2x` | `migrations-2x`: `mysql:8.0` descartável, aplica tudo duas vezes, confere os 7 status do seed (cerca de 20 s) |
+| cluster | `tf-fmt`, `tf-validate`, `tflint` | `tflint` não bloqueia, como no CI (`continue-on-error`) |
+| gateway | `composer`, `phpunit-contract`, `phpunit`, `phpstan`, `tf-fmt`, `tf-validate` | `tf-validate` usa `-lockfile=readonly`, porque o lock é versionado aqui |
+| app | `composer`, `cs-fixer`, `phpstan`, `phpunit`, `kustomize`, `image` | `image` só com `--image`; `cs-fixer` com `--using-cache=no` (achado 18) |
+| todos | `actionlint` | extra, só aviso |
+| workspace | `shellcheck`, `python`, `contratos` | `contratos` = `bin/check-contracts.py` |
 
-| Comando | Para quê |
-|---|---|
-| `ws isolate <branch> [repos…]` | Cria `git worktree` de cada repo, na mesma branch, dentro do worktree da sessão (`<sessão>/repos/<r>`), no lugar do symlink compartilhado. Duas sessões abertas no app não pisam uma na outra. `ws isolate --rm` desfaz. |
-| `ws branch <nome> [repos…]` | `switch develop && pull --ff-only && switch -c <nome>` nos repos indicados (regra 3 do `AGENTS.md`). |
-| `ws diff [--stat]` | Diff contra `develop` em todos os repos. |
-| `ws ci [<branch>]` | Último run de CI da branch em cada repo. Em falha, salva `gh run view --log-failed` em `.ws/ci/<repo>.log`. |
-| `ws prs --branch <b>` | PRs irmãos (mesmo nome de branch) nos 4 repos, com a ordem de merge. |
-| `ws context` | Retrato curto (≤ 15 linhas): branch, sujeira, atrás/à frente, PRs abertos, CI de `develop` vermelho. Usado pelo hook `SessionStart`. |
-| `ws statusline` | Uma linha para a status line (6.2). Rápido: não usa rede. |
-| `ws doctor` | Ver 1.4. |
-| `ws hooks install` | Ver 3.6. |
+**Flags e saída:**
 
-**Aceite:** com os 4 repos em `develop`, `bin/ws verify` fica verde. Plantando um erro de
-`terraform fmt` no cluster, ele fica vermelho e aponta arquivo e passo.
+- flags: `--repo <r>` (nome curto, pode repetir), `--changed`, `--fast` (pula `migrations-2x`),
+  `--image` e `--json`;
+- uma linha por passo enquanto roda e, no fim, as últimas 40 linhas de cada passo que falhou;
+- `.ws/verify/latest.json` (Apêndice C) e `.ws/verify/logs/<repo>-<passo>.log`;
+- exit 1 se um passo bloqueante falhar.
 
-#### 1.3 Um só caminho: o CI chama os mesmos scripts
+**Subcomandos do `bin/ws`:**
+
+| Comando | Para quê | Status |
+|---|---|---|
+| `ws exec <repo> <cmd…>` | Comando avulso na imagem, dentro do repo. | ✅ |
+| `ws context` | Uma linha por repo: branch, sujeira, divergência, PRs abertos, CI de `develop`. Cerca de 2 s. | ✅ |
+| `ws ci [<branch>]` | Último run de cada workflow na branch. Salva o log do que falhou em `.ws/ci/<repo>-<branch>-<workflow>.log`. | ✅ |
+| `ws diff [--patch]` | Commits contra `origin/develop` e o que não foi commitado, só nos repos com mudança. | ✅ |
+| `ws prs --branch <b>` | PRs irmãos de uma mudança, na ordem de merge. | ✅ |
+| `ws branch <nome> <repo…>` | Cria a branch a partir de `origin/develop`, ou usa a existente. Recusa se houver mudança não commitada. | ✅ |
+| `ws isolate <b> <repo…>` / `--rm` | Numa sessão em worktree, troca o `repos/` compartilhado por worktrees próprios dos repos indicados. Os outros seguem compartilhados. `--rm` recusa se houver mudança não commitada e mantém as branches. | ✅ |
+| `ws doctor` | Docker, imagem, Terraform, `gh`, clones (symlink, aninhado, worktrees, commits não publicados), proteção de branch e perfil AWS. | ✅ (o `core.hooksPath` entra na 3.6) |
+| `ws statusline` | Linha para a status line. | Fase 6 |
+| `ws hooks install` | Git hooks versionados. | Fase 3.6 |
+
+**Aceite (conferido em 2026-11-07):**
+
+- `bin/ws verify` termina em `OK` em cerca de 25 s nos 4 repos, com 2 avisos não bloqueantes no
+  cluster (tflint: `data.aws_partition.current` e `local.account_id` sem uso; actionlint:
+  SC2129 no `pr.yml`);
+- um `terraform fmt` quebrado num worktree isolado deixa o verify vermelho, com o diff;
+- depois do verify, `git status` dos 4 repos igual ao de antes.
+
+#### 1.3 Um só caminho: o CI chama os mesmos scripts · pendente (PR nos repos)
 
 - Em cada repo, mover a lógica dos steps do `pr.yml` para `scripts/ci/<passo>.sh`. Exemplo:
   `scripts/ci/test-migrations.sh` na fundação, chamado pelo `pr.yml` **e** pelo `ws verify`.
-  Sem isso, os dois caminhos divergem em semanas. (Não é automação nova: é o CI que já existe
-  chamando um script em vez de YAML inline.)
-- Padronizar Terraform em 1.9.8 e a chave do cache do Composer pelo `composer.lock`.
+  Sem isso, os dois caminhos divergem com o tempo. Hoje o `verify.py` replica cada step, e a
+  coluna "Espelha" do JSON diz qual.
+- Padronizar Terraform em 1.9.8 (o gateway está em 1.9.5) e a chave do cache do Composer pelo
+  `composer.lock`.
 - 4 PRs na branch `ci/scripts-de-verificacao`.
 
-#### 1.4 `bin/ws doctor`
+#### 1.4 `bin/ws doctor` · ✅
 
-Diagnóstico do ambiente, cada linha com ok, aviso ou erro e a correção sugerida:
+Hoje ele aponta:
 
-- Docker de pé; imagem `oficina-tooling` atual;
-- Terraform local igual ao do CI; `gh` ≥ 2.60;
-- repos como diretórios reais, sem clone aninhado nem nome antigo no caminho, sem worktree órfão;
-- `core.hooksPath` instalado (3.6);
-- perfil `oficina-readonly` presente e só-leitura;
-- branch protection com `enforce_admins` e checks obrigatórios (via `gh api`).
+- `gh` antigo;
+- os 3 repos como symlink e 2 deles aninhados com nome antigo (0.2);
+- 3 worktrees velhos e 2 commits não publicados na app (0.1);
+- proteção de branch fraca nos 4 repos (decisão 4);
+- perfil `oficina-readonly` ausente (decisão 5).
 
 ---
 
@@ -602,6 +612,8 @@ deveria cair, e a mesma lição não deveria aparecer duas vezes.
 | 3 | IA automatizada no GitHub e rotinas agendadas? | **respondida:** não; uso interativo pelo Claude Code |
 | 4 | Ligar `enforce_admins` e checks obrigatórios em `main` e `develop` (0.6)? Você também perde o merge forçado. | aberta |
 | 5 | Você cria um perfil AWS só-leitura para o agente? (Eu não crio recurso na AWS.) | aberta |
+| 6 | Posso abrir os PRs nos repos de produto que o plano prevê (1.1 Makefile/`php.sh`, 1.3 scripts de CI, achados 17 e 18, Fase 4.1 `AGENTS.md` por repo)? Ficam como draft para `develop`. | aberta |
+| 7 | Achado 16: conferir a policy de confiança dos roles `oficina-gha-*` (OIDC falhando em `develop`). Só você tem acesso. | aberta |
 
 ## 6. Fora do escopo
 
@@ -620,27 +632,25 @@ deveria cair, e a mesma lição não deveria aparecer duas vezes.
 
 ## 7. Próximos passos
 
-1. Responder as decisões 1, 2, 4 e 5.
-2. Com 1 e 2 respondidas, terminar a Fase 0: preservar os commits, clones planos, limpar os
+1. Achado 16 (OIDC): enquanto não for resolvido, nenhum deploy nem plan roda.
+2. Responder as decisões 1, 2, 4, 5 e 6.
+3. Com 1 e 2 respondidas, terminar a Fase 0: preservar os commits, clones planos, limpar os
    worktrees velhos e testar o `.ignore`.
-3. Fase 1 (`tooling/` + `ws verify`), porque todo o resto se apoia nela.
+4. Fases 2 em diante, no workspace, sem depender das decisões.
 
 ---
 
 ## Apêndice A — Hooks e permissões que entram nas próximas fases
 
-O `.claude/settings.json` atual já tem as permissões revisadas e o hook `SessionStart`. Isto é o
-que se soma a ele:
+O `.claude/settings.json` atual já tem as permissões revisadas (inclusive as dos comandos da
+Fase 1) e o hook `SessionStart`. Isto é o que se soma a ele:
 
 ```json
 {
   "env": { "AWS_PROFILE": "oficina-readonly" },
   "permissions": {
-    "allow": [
-      "Bash(bin/ws verify:*)", "Bash(bin/ws context:*)", "Bash(bin/ws ci:*)",
-      "Bash(bin/ws diff:*)", "Bash(bin/ws doctor)", "Bash(bin/ws statusline)"
-    ],
-    "ask": [ "Bash(bin/ws isolate:*)", "Bash(bin/ws branch:*)", "Bash(bin/ws hooks:*)" ]
+    "allow": [ "Bash(bin/ws statusline)" ],
+    "ask": [ "Bash(bin/ws hooks:*)" ]
   },
   "hooks": {
     "SessionStart": [
@@ -687,26 +697,45 @@ e `bash -c`, e remove `git -C`, `-chdir`, `env` e `cd x &&`.
 | `^git\s+(reset\s+--hard\|clean\s+-[a-z]*f\|branch\s+-D\|checkout\s+--\s\|restore\s+\.\|stash\s+(drop\|clear))` | ask | Destrói trabalho local. |
 | `^git\s+commit\b.*Co-Authored-By` | deny | Regra de autoria do `AGENTS.md`. |
 
-## Apêndice C — Saída de `bin/ws verify --json`
+## Apêndice C — Saída de `bin/ws verify --json` (trecho real)
+
+`status`: `ok`, `falhou` (bloqueante), `aviso` (não bloqueante) ou `pulado` (`--fast`, sem `--image`).
 
 ```json
 {
-  "started_at": "2026-11-10T14:02:11-03:00",
-  "duration_s": 74,
-  "ok": false,
-  "mode": { "changed": true, "fast": true, "image": false },
+  "started_at": "2026-11-07T22:20:03-03:00",
+  "duration_s": 24,
+  "ok": true,
+  "mode": {
+    "changed": false,
+    "fast": false,
+    "image": false
+  },
+  "missing": [],
   "repos": [
     {
-      "repo": "oficina-gateway-auth",
-      "branch": "feat/claim-plate",
+      "repo": "oficina-infra-cluster",
+      "branch": "fix/versao-do-cluster-1-31",
       "steps": [
-        { "id": "phpunit-contract", "ok": true,  "duration_s": 6 },
-        { "id": "phpstan",          "ok": false, "duration_s": 12,
-          "log": ".ws/verify/logs/oficina-gateway-auth-phpstan.log",
-          "summary": "2 erros: src/Security/JwtProvider.php:58, src/Handler/AuthCpfHandler.php:91" }
+        {
+          "id": "tf-fmt",
+          "mirrors": "pr.yml: terraform fmt",
+          "blocking": true,
+          "status": "ok",
+          "duration_s": 1,
+          "log": ".ws/verify/logs/oficina-infra-cluster-tf-fmt.log"
+        },
+        {
+          "id": "tflint",
+          "mirrors": "pr.yml: tflint (continue-on-error)",
+          "blocking": false,
+          "status": "aviso",
+          "duration_s": 1,
+          "log": ".ws/verify/logs/oficina-infra-cluster-tflint.log",
+          "summary": "on locals.tf line 15: | 15:   account_id = data.aws_caller_identity.current.account_id | Reference: ..."
+        }
       ]
     }
-  ],
-  "contratos": { "ok": true, "erros": 0, "avisos": 6 }
+  ]
 }
 ```

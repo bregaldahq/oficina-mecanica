@@ -2,8 +2,15 @@
   "permissions": {
     "allow": [
       "Bash(bin/ws status)",
-      "Bash(bin/ws prs)",
+      "Bash(bin/ws prs:*)",
       "Bash(bin/ws grep:*)",
+      "Bash(bin/ws context)",
+      "Bash(bin/ws ci:*)",
+      "Bash(bin/ws diff:*)",
+      "Bash(bin/ws verify:*)",
+      "Bash(bin/ws doctor)",
+      "Bash(bin/tooling tag)",
+      "Bash(bin/tooling image)",
       "Bash(bin/check-contracts.py)",
       "Bash(bin/check-contracts.py --verbose)",
       "Bash(git status:*)",
@@ -35,6 +42,8 @@
       "Bash(terraform validate:*)"
     ],
     "ask": [
+      "Bash(bin/ws branch:*)",
+      "Bash(bin/ws isolate:*)",
       "Bash(git push:*)",
       "Bash(git -C * push*)",
       "Bash(git reset --hard*)",

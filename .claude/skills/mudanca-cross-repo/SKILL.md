@@ -30,14 +30,21 @@ Mostre o plano e espere confirmação antes de editar.
 
 ## 3. Executar
 
-- Em cada repo afetado: `git -C repos/<repo> switch develop && git -C repos/<repo> pull --ff-only`,
-  depois crie a **mesma** branch (`feat/<slug>` ou `fix/<slug>`) em todos.
-- Faça a mudança e rode a validação local do repo (tabela em `AGENTS.md`).
-- Rode `bin/check-contracts.py`.
-- Peça ao subagente `guardiao-de-contratos` uma revisão do diff conjunto.
+- Crie a **mesma** branch (`feat/<slug>` ou `fix/<slug>`) nos repos afetados, a partir de
+  `origin/develop`:
+  - numa sessão em worktree (`.claude/worktrees/...`), use `bin/ws isolate <branch> <repo...>`,
+    que dá à sessão clones próprios e não atrapalha outra sessão aberta;
+  - fora de worktree, use `bin/ws branch <branch> <repo...>`.
+- Faça a mudança. Para rodar algo avulso (um teste, um `terraform validate`), use
+  `bin/ws exec <repo> <cmd>`: não há PHP nem tflint na máquina.
+- Rode `bin/ws verify --changed`. Ele cobre os testes de cada repo tocado e o
+  `bin/check-contracts.py`, e precisa terminar em `OK`. Leia o log de cada passo que falhar em
+  `.ws/verify/logs/`.
+- Peça ao subagente `guardiao-de-contratos` uma revisão do diff conjunto (`bin/ws diff --patch`).
 
 ## 4. PRs
 
 Commits e PRs seguem as convenções de `AGENTS.md` (português, Conventional Commits, sem
 coautoria de ferramenta). Abra os PRs para `develop` **só depois de o usuário pedir**. Na
-descrição de cada PR, inclua a ordem de merge e os links dos PRs irmãos.
+descrição de cada PR, inclua a ordem de merge e os links dos PRs irmãos (`bin/ws prs --branch
+<branch>`). Numa sessão isolada, desfaça com `bin/ws isolate --rm` quando tudo estiver publicado.

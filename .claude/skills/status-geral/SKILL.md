@@ -5,13 +5,14 @@ description: Panorama dos quatro repositórios da Oficina — branch atual, trab
 
 # Status geral do workspace
 
-1. Rode `bin/ws status`. Se algum repo aparecer como ausente, diga e sugira `bin/ws clone`
-   (ou `bin/ws link <dir>` se já houver clones na máquina).
-2. Rode `bin/ws prs`.
-3. Para cada repo, veja o último run de CI nas branches `develop` e `main`:
-   `gh run list --repo bregaldahq/<repo> --branch <branch> --limit 1`.
-4. Rode `bin/check-contracts.py`.
+1. Rode `bin/ws context`: uma linha por repo, com branch, sujeira, divergência com o upstream,
+   PRs abertos e se o CI de `develop` está vermelho. Se algum repo aparecer como ausente, diga e
+   sugira `bin/ws clone` (ou `bin/ws link <dir>` se já houver clones na máquina).
+2. Se algum CI estiver vermelho, rode `bin/ws ci develop` (e `bin/ws ci main`, se fizer sentido)
+   e leia o log das etapas que falharam, salvo em `.ws/ci/`, para dizer o motivo em uma linha.
+   Não use `gh run list --branch`: o `gh` desta máquina é antigo e não tem essa opção.
+3. Rode `bin/check-contracts.py`.
 
-Entregue uma tabela curta, uma linha por repo: branch, sujos, à frente/atrás, PRs abertos,
-CI de `develop` e de `main`. Abaixo, só o que pede ação: repo atrás do remoto, branch esquecida
-com trabalho não commitado, PR parado, CI vermelho, erro de contrato. Não repita o que está ok.
+Entregue uma tabela curta, uma linha por repo: branch, sujos, à frente/atrás, PRs abertos e CI
+de `develop`. Abaixo, só o que pede ação: repo atrás do remoto, branch esquecida com trabalho não
+commitado, PR parado, CI vermelho (com o motivo), erro de contrato. Não repita o que está ok.

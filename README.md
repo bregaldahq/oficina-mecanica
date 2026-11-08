@@ -85,9 +85,14 @@ Fica no repositório da aplicação, em `docs/fase-3/`. Este repositório aponta
 git clone https://github.com/bregaldahq/oficina-mecanica.git
 cd oficina-mecanica
 make setup          # clona os quatro repositórios em repos/
-make status         # branch, arquivos sujos e divergência de cada um
+make doctor         # confere Docker, ferramentas, clones e proteções de branch
+make verify         # roda o que o CI de cada repo roda, local e sem AWS (~30 s)
 claude              # ou o agente de sua preferência, a partir da raiz
 ```
+
+A máquina só precisa de Docker, `git`, `gh` e `python3`. PHP, Composer, Terraform, tflint e
+kustomize vêm da imagem `tooling/Dockerfile`, nas versões do CI, construída na primeira vez que
+for usada.
 
 Já tem os repositórios clonados em outro lugar? Em vez de clonar de novo:
 
@@ -101,9 +106,11 @@ bin/ws link ~/caminho/onde/estao/os/clones
 |---|---|
 | `AGENTS.md` | contexto para qualquer agente: mapa, como cada repo funciona, acoplamento, convenções, regras |
 | `CLAUDE.md` | importa o `AGENTS.md` e lista o que é específico do Claude Code |
-| `Makefile` | atalhos: `make setup`, `make pull`, `make status`, `make prs`, `make contratos` |
+| `Makefile` | atalhos: `make setup`, `make pull`, `make status`, `make prs`, `make contratos`, `make verify`, `make doctor` |
 | `repos.txt` | lista de repositórios, na ordem de apply. Para incluir um repo, adicione uma linha |
-| `bin/ws` | `clone`, `link`, `pull`, `status`, `prs`, `grep <padrão>`, `run <cmd>` em todos os repos |
+| `bin/ws` | operações nos quatro repos: `clone`, `link`, `pull`, `status`, `context`, `prs`, `ci`, `diff`, `grep`, `verify`, `exec`, `branch`, `isolate`, `doctor`, `run` (`bin/ws` sem argumento lista tudo) |
+| `bin/verify.py` | o `bin/ws verify`: os passos do `pr.yml` de cada repo, em paralelo, com resultado em `.ws/verify/latest.json` |
+| `bin/tooling`, `tooling/Dockerfile` | imagem com PHP 8.2, Composer, Terraform 1.9.8, tflint, kustomize, actionlint e shellcheck |
 | `bin/check-contracts.py` | confere o acoplamento por SSM: consumidor sem dono, dono duplicado, parâmetro órfão |
 | `.claude/skills/` | `status-geral`, `mudanca-cross-repo`, `checar-contratos` |
 | `.claude/agents/` | `guardiao-de-contratos`, revisor de diffs contra o `CONTRATOS.md` |

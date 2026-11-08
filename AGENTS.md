@@ -95,8 +95,9 @@ Quem executa é o Job da aplicação, não este repo. Toda migration precisa ser
 O `pr.yml` aplica todas as migrations **duas vezes** num MySQL real, para provar a idempotência.
 O modelo de dados está documentado em `docs/MODELO-DE-DADOS.md`.
 
-**Validar.** `terraform fmt -check -recursive` e `terraform init -backend=false && terraform validate`.
-Para as migrations, suba um container `mysql:8.0` e aplique os arquivos em ordem, duas vezes.
+**Validar.** `bin/ws verify --repo fundacao`. Ele roda `fmt` e `validate` e aplica as
+migrations duas vezes num MySQL 8.0 descartável, como o `pr.yml`. O `.terraform.lock.hcl` é
+ignorado neste repo, então cada `init` resolve os providers de novo.
 
 ### `oficina-infra-cluster` — cluster
 
@@ -132,8 +133,8 @@ dos segredos.
 - Há um `destroy.yml` que só roda por disparo manual e pede que você digite o nome do ambiente.
   Agente não dispara.
 
-**Validar.** `terraform fmt`, `terraform init -backend=false`, `terraform validate` (o CI também
-roda `tflint`).
+**Validar.** `bin/ws verify --repo cluster`: `fmt`, `validate` sem backend e `tflint`, este
+não bloqueante, como no CI. O `.terraform.lock.hcl` também é ignorado aqui.
 
 ### `oficina-gateway-auth` — borda e autenticação
 
@@ -179,8 +180,9 @@ entre elas é o `handler`. Assim, quem emite e quem valida o token rodam o mesmo
 entrada fixa contra uma string literal. A aplicação tem o teste espelho. Se ele quebrar,
 descubra o que mudou no `JwtProvider` e reverta. Não atualize a string sem mudar os dois lados.
 
-**Validar.** Veja a tabela de validação local mais abaixo. Os ARNs dos layers (Bref, New Relic)
-em `envs/*.tfvars` envelhecem: confira a versão antes de mudar.
+**Validar.** `bin/ws verify --repo gateway`. O `.terraform.lock.hcl` é versionado aqui: se
+mudar provider, atualize-o com `bin/ws exec gateway terraform init -backend=false` e commite. Os
+ARNs dos layers (Bref, New Relic) em `envs/*.tfvars` envelhecem: confira a versão antes de mudar.
 
 ### `oficina-api` — aplicação
 
@@ -262,7 +264,8 @@ O contrato HTTP completo está em `swagger.yaml`.
   repositório PDO precisa entrar ali também.
 - `src/Infrastructure/Database/schema.sql` é legado das fases anteriores e nada o referencia. O
   schema de verdade são as migrations do repo de banco.
-- Não há PHP na máquina: use `scripts/php.sh` ou `make` (docker compose).
+- Não há PHP na máquina: use `bin/ws verify --repo api` ou `bin/ws exec api <cmd>` (veja
+  "Validação local").
 
 ## Onde mexer para…
 
@@ -304,14 +307,24 @@ parâmetro com dois donos e parâmetro publicado que ninguém lê.
 ## Ferramentas do workspace
 
 ```bash
-make setup                 # baixa os repos que faltam em repos/
-bin/ws status              # branch, arquivos sujos e divergência de cada repo
-bin/ws pull                # fast-forward em todos
-bin/ws prs                 # PRs abertos em todos
-bin/ws grep -E 'padrão'    # busca nos quatro repos (só arquivos versionados ou novos)
+make setup                         # baixa os repos que faltam em repos/
+bin/ws status                      # branch, arquivos sujos e divergência de cada repo
+bin/ws context                     # o mesmo, mais PRs abertos e CI de develop, em 4 linhas
+bin/ws pull                        # fast-forward em todos
+bin/ws prs [--branch <b>]          # PRs abertos; com --branch, os PRs irmãos de uma mudança
+bin/ws ci [<branch>]               # último run de cada workflow; log do que falhou em .ws/ci/
+bin/ws diff [--patch]              # o que mudou contra origin/develop
+bin/ws grep -E 'padrão'            # busca nos quatro repos (só arquivos versionados ou novos)
+bin/ws verify [--changed] [--fast] # o que o pr.yml roda, local e sem AWS (ver "Validação local")
+bin/ws exec <repo> <cmd...>        # comando na imagem de ferramentas (PHP, Composer, Terraform...)
+bin/ws branch <nome> <repo...>     # mesma branch nos repos indicados, a partir de origin/develop
+bin/ws isolate <b> <repo...>       # worktrees próprios desta sessão (sessões paralelas)
+bin/ws doctor                      # confere Docker, ferramentas, clones e proteções de branch
 bin/ws run git log -3 --oneline
-bin/check-contracts.py     # acoplamento SSM consistente?
+bin/check-contracts.py             # acoplamento SSM consistente?
 ```
+
+Onde um comando pede `<repo>`, vale o nome curto: `fundacao`, `cluster`, `gateway`, `api`.
 
 ### Como buscar
 
@@ -332,14 +345,28 @@ os mesmos do checkout principal: duas sessões abertas ao mesmo tempo mexem nos 
 
 ## Validação local
 
-Não há PHP nem Composer na máquina de desenvolvimento — PHP roda em Docker. Sem conta AWS, o
-teto de verificação dos repos de IaC é `fmt` + `validate` sem backend.
+Não há PHP, Composer, kubectl nem tflint na máquina de desenvolvimento: tudo roda na imagem
+`tooling/Dockerfile`, com as versões do CI. Sem conta AWS, o teto de verificação dos repos de
+IaC é `fmt` + `validate` sem backend.
 
-| Repo | Comandos |
-|---|---|
-| aplicação | `make up`, `make test`, `make analyse`, `make lint`, `make k8s-render` (ou `scripts/php.sh vendor/bin/phpunit`) |
-| lambda-auth | `make test`, `make stan`, `make fmt`, `make validate` |
-| infra-database, infra-k8s | `terraform fmt -check -recursive` e `terraform init -backend=false && terraform validate` |
+**Use `bin/ws verify`.** Ele roda, em paralelo e sem AWS, o mesmo que o `pr.yml` de cada repo:
+
+- **fundação:** `terraform fmt` e `validate`, checagem de SQL proibido e as migrations aplicadas
+  duas vezes num MySQL 8.0 com a conferência do seed;
+- **cluster:** `fmt`, `validate` e `tflint` (não bloqueante, como no CI);
+- **gateway:** composer, contrato do JWT, phpunit, phpstan, `fmt` e `validate`;
+- **aplicação:** composer, php-cs-fixer, phpstan, phpunit e `kustomize build` dos dois overlays,
+  e o build da imagem de produção com `--image`;
+- **workspace:** shellcheck, Python e `check-contracts`.
+
+O `actionlint` roda em todos os repos como aviso. Leva cerca de 30 s com tudo; `--changed` olha
+só os repos com mudança, e `--fast` pula as migrations. O resultado vai para
+`.ws/verify/latest.json` e os logs para `.ws/verify/logs/`.
+
+Para um comando avulso, use `bin/ws exec <repo> <cmd>`, por exemplo
+`bin/ws exec gateway vendor/bin/phpunit --filter Jwt`. O `make test`/`make stan` do gateway
+chamam `vendor/bin/...` direto e **não funcionam** sem PHP local. O `make test` da aplicação usa
+o docker compose (`make up` antes) e o `make k8s-render` precisa de kubectl.
 
 ## Convenções (valem nos quatro repos)
 
@@ -361,9 +388,10 @@ teto de verificação dos repos de IaC é `fmt` + `validate` sem backend.
 2. Mudança que atravessa repositórios segue a ordem de apply: o **produtor** do contrato muda e é
    mergeado antes do **consumidor**. Remoção é o contrário: primeiro o consumidor deixa de ler,
    depois o produtor deixa de publicar.
-3. Uma branch com o **mesmo nome** em cada repo afetado, e PRs que se referenciam.
-4. Antes de abrir PR de mudança cross-repo, rode `bin/check-contracts.py` e os testes de cada repo
-   tocado.
+3. Uma branch com o **mesmo nome** em cada repo afetado (`bin/ws branch`, ou `bin/ws isolate`
+   numa sessão em worktree), e PRs que se referenciam (`bin/ws prs --branch`).
+4. Antes de dar uma mudança por pronta, rode `bin/ws verify --changed`. Ele inclui o
+   `bin/check-contracts.py` e os testes de cada repo tocado, e precisa terminar em `OK`.
 5. Não commite nada dentro de `repos/` a partir de comandos do workspace sem conferir em qual repo
    e em qual branch está — cada um é um Git separado.
 6. Não leia nem imprima `.env` nem saída de `get-secret-value`. Os `envs/*.tfvars` são
