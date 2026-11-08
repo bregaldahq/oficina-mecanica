@@ -1,0 +1,7 @@
+# Repositórios do sistema, na ordem de apply (destroy é a ordem inversa).
+# Formato: <nome> <papel>
+# O owner no GitHub vem de OFICINA_OWNER (padrão: bregaldahq).
+oficina-infra-fundacao   fundacao: VPC, RDS, segredos, migrations
+oficina-infra-cluster    cluster: EKS, add-ons, ECR, NLB interno
+oficina-gateway-auth     borda: Lambdas auth-cpf e jwt-authorizer, API Gateway
+oficina-api              aplicacao: API PHP, deploy kustomize, contratos e ADRs
