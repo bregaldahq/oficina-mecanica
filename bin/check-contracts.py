@@ -1,84 +1,88 @@
 #!/usr/bin/env python3
-"""Confere o acoplamento por SSM entre os repositórios.
+"""Confere se os quatro repositórios obedecem ao CONTRATOS.md (docs/fase-3 da aplicação).
 
-Varre repos/ atrás de nomes de parâmetro /oficina/<env>/..., separa quem
-publica (resource "aws_ssm_parameter") de quem consome (qualquer outra menção)
-e aponta:
+Famílias de checagem (código em tools/contratos/):
 
-  - parâmetro consumido que ninguém publica  -> erro (apply quebra)
-  - parâmetro publicado por mais de um repo  -> erro (dois donos)
-  - parâmetro publicado que ninguém consome  -> aviso
+  ssm         §2  parâmetro consumido sem dono, com dois donos, sem consumidor, fora do documento
+  jwt         §4  token literal igual nos dois testes de contrato e no contract-token.md;
+                  montagem do token equivalente nos dois JwtProvider
+  rotas       §5  rota pública da app com rota dedicada no gateway, e vice-versa; authorizer;
+                  tabelas do CONTRATOS.md e security: [] do swagger.yaml
+  segredos    §3  chaves lidas pelo ExternalSecret, pela Lambda e pelo smoke test existem no
+                  secrets.tf; documento
+  k8s         ClusterSecretStore, RBAC das CRDs da app, placeholders do deploy.yml
+  migrations  §6  nome e sequência, SQL proibido, seed só _demo; colunas faltando no schema
+                  SQLite dos testes de integração
+  nomes       nomes antigos (state, role de CI, tag Repo), tags obrigatórias, OIDC, versão do
+              Terraform
+  docs        caminhos citados no AGENTS.md, README, CLAUDE.md e .claude/ existem
 
-Sai com código 1 se houver erro. Uso: bin/check-contracts.py [--verbose]
+erro = as implementações discordam e algo quebra; aviso = o documento está desatualizado;
+conhecido = erro aceito, com motivo, em tools/contratos/conhecidos.txt.
+
+Uso: bin/check-contracts.py [--json] [--only ssm,rotas,...] [--verbose]
+Sai com 1 se houver erro (não conhecido). Vale a branch que estiver em disco em cada repo.
 """
-import re
-import subprocess
+import argparse
+import json
 import sys
-from collections import defaultdict
 from pathlib import Path
 
-from wslib import repos_dir
+from wslib import ROOT, repos_dir
 
-REPOS = repos_dir()
-EXTENSIONS = {".tf", ".yml", ".yaml", ".sh", ".php", ".py", ".json"}
-
-# Aceita as três formas de escrever o ambiente que aparecem nos repos:
-# ${var.environment}, ${ENVIRONMENT} / $ENVIRONMENT e <env>.
-ENV = r"(?:\$\{[^}]+\}|\$[A-Za-z_]+|<env>|hml|prod)"
-PARAM = re.compile(r"/oficina/" + ENV + r"/([a-z_]+/[a-z_]+)")
-RESOURCE = re.compile(r'resource\s+"aws_ssm_parameter"\s+"[^"]+"\s*\{(.*?)\n\}', re.S)
-
-
-def files(repo: Path):
-    # Só arquivos versionados: ignora vendor/, .terraform/ e clones aninhados.
-    tracked = subprocess.run(["git", "-C", str(repo), "ls-files"], capture_output=True, text=True, check=True)
-    for rel in tracked.stdout.splitlines():
-        path = repo / rel
-        if path.suffix in EXTENSIONS and path.is_file():
-            yield path
+sys.path.insert(0, str(ROOT / "tools"))
+import contratos  # noqa: E402
+from contratos import REPOS, ssm  # noqa: E402
 
 
 def main() -> int:
-    verbose = "--verbose" in sys.argv
-    repos = sorted(p for p in REPOS.iterdir() if p.is_dir()) if REPOS.exists() else []
-    if not repos:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--only", default="")
+    parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("-h", "--help", action="store_true")
+    args = parser.parse_args()
+    if args.help:
+        print(__doc__.strip())
+        return 0
+
+    base = repos_dir()
+    repos = contratos.Repos({short: base / new for short, (new, _) in REPOS.items()}, ROOT)
+    missing = [REPOS[s][0] for s in REPOS if not repos.has(s)]
+    if len(missing) == len(REPOS):
         print("Nenhum repositório em repos/. Rode bin/ws clone primeiro.")
         return 1
 
-    producers = defaultdict(set)
-    consumers = defaultdict(set)
-    for repo in repos:
-        for path in files(repo):
-            text = path.read_text(errors="ignore")
-            published = set()
-            if path.suffix == ".tf":
-                for block in RESOURCE.findall(text):
-                    published |= set(PARAM.findall(block))
-            for name in published:
-                producers[name].add(repo.name)
-            for name in set(PARAM.findall(text)) - published:
-                consumers[name].add(repo.name)
+    only = {x.strip() for x in args.only.split(",") if x.strip()} or None
+    if only and only - set(contratos.FAMILIES):
+        print(f"família desconhecida: {', '.join(sorted(only - set(contratos.FAMILIES)))} "
+              f"(opções: {', '.join(contratos.FAMILIES)})")
+        return 2
+    findings = contratos.run(repos, only)
+    errors = sum(f.severidade == "erro" for f in findings)
+    count = {s: sum(f.severidade == s for f in findings) for s in ("erro", "conhecido", "aviso")}
 
-    errors = 0
-    for name in sorted(consumers):
-        if name not in producers:
-            errors += 1
-            print(f"ERRO  /oficina/<env>/{name} consumido por {', '.join(sorted(consumers[name]))}, mas ninguém publica")
-    for name in sorted(producers):
-        if len(producers[name]) > 1:
-            errors += 1
-            print(f"ERRO  /oficina/<env>/{name} publicado por mais de um repo: {', '.join(sorted(producers[name]))}")
-        elif not consumers.get(name, set()) - producers[name]:
-            print(f"aviso /oficina/<env>/{name} publicado por {next(iter(producers[name]))}, sem consumidor em outro repo")
+    if args.json:
+        print(json.dumps({"ok": errors == 0, "ausentes": missing, "contagem": count,
+                          "achados": [f.as_dict() for f in findings]}, ensure_ascii=False, indent=2))
+        return 1 if errors else 0
 
-    if verbose:
+    for name in missing:
+        print(f"aviso     {name} ausente em {base}: as checagens que dependem dele foram puladas")
+    for f in findings:
+        print(f"{f.severidade.upper() if f.severidade != 'aviso' else 'aviso':<9} {f.id:<8} {f.secao:<6} {f.mensagem}")
+        for loc in f.locais:
+            print(f"{'':<25}{loc}")
+
+    if args.verbose:
+        producers, consumers = ssm.inventory(repos)
         print()
         for name in sorted(set(producers) | set(consumers)):
             print(f"/oficina/<env>/{name}")
-            print(f"   publica: {', '.join(sorted(producers.get(name, []))) or '-'}")
-            print(f"   consome: {', '.join(sorted(consumers.get(name, []))) or '-'}")
+            print(f"   publica: {', '.join(REPOS[s][0] for s in producers.get(name, {})) or '-'}")
+            print(f"   consome: {', '.join(REPOS[s][0] for s in consumers.get(name, {})) or '-'}")
 
-    print(f"\n{len(producers)} publicados, {len(consumers)} consumidos, {errors} erro(s).")
+    print(f"\n{count['erro']} erro(s), {count['conhecido']} conhecido(s), {count['aviso']} aviso(s).")
     return 1 if errors else 0
 
 

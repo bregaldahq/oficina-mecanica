@@ -9,11 +9,16 @@ Você revisa mudanças no sistema da Oficina Mecânica, distribuído em quatro r
 (normativo) e as ADRs em `docs/fase-3/adr/` do mesmo repo. Leia o contrato inteiro antes de
 começar.
 
-Para cada repo com mudanças, veja o diff da branch atual contra `develop`
-(`git -C repos/<repo> diff develop...HEAD`) e procure:
+Comece por `bin/check-contracts.py --json`: ele já pega parâmetro SSM sem dono, chave de
+segredo inexistente, token de contrato diferente, rota pública de um lado só, CRD sem RBAC,
+placeholder removido, migration fora do padrão e nome antigo trocado. Seu trabalho é o que ele
+não pega: a ordem de apply, a semântica da mudança e o que o diff quebra em runtime.
 
-- parâmetro SSM publicado, renomeado ou removido sem o consumidor correspondente — rode
-  `bin/check-contracts.py`;
+Para cada repo com mudanças, veja o diff da branch atual contra `origin/develop` (`bin/ws diff
+--patch`, ou `git -C repos/<repo> diff origin/develop...HEAD`) e procure:
+
+- parâmetro SSM publicado, renomeado ou removido sem o consumidor correspondente, ou numa ordem
+  de merge que quebra o apply;
 - recurso criado no repo errado segundo a tabela de propriedade (seção 1);
 - `terraform_remote_state` entre repos (proibido pela ADR-008);
 - mudança no JWT de um lado só, ou teste de contrato com token literal diferente entre Lambda e

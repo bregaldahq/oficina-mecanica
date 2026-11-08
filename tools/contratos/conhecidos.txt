@@ -1,0 +1,7 @@
+# Erros de contrato já conhecidos e aceitos por enquanto. Aparecem como "conhecido" e não
+# derrubam o bin/check-contracts.py nem o bin/ws verify. Formato: <ID> <chave>  # motivo
+#
+# Cada linha precisa de motivo e de onde a decisão está registrada. Remova a linha quando
+# resolver; o checker avisa se uma linha deixar de corresponder a um achado.
+
+ROTA-1 POST /api/service-orders/{id}/approval  # webhook público na app sem rota dedicada no gateway; achado 19 do docs/PLANO-HARNESS-IA.md, aguardando decisão (2026-11-07)

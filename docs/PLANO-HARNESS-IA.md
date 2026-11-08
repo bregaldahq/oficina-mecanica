@@ -30,7 +30,7 @@ qualquer sessão (**corrigido**, ver o Andamento), conseguir **verificar** o que
 |---|---|---|---|
 | 0 | Consertar a base | sem isso, todo o resto roda às cegas | ½ dia (metade feita) |
 | 1 | Verificação local num comando | autonomia sem verificação é aposta | ✅ no workspace; PRs nos repos pendentes |
-| 2 | Checagem de contrato completa | o maior risco do sistema está *entre* os repos | 2 dias |
+| 2 | Checagem de contrato completa | o maior risco do sistema está *entre* os repos | ✅ |
 | 3 | Hooks e guardrails | regra escrita vira regra executada; toda sessão termina verificada | 1 dia |
 | 4 | Contexto em camadas | contexto certo, na hora certa, mais barato | 1 dia |
 | 5 | Comandos: skills e subagentes | cada mudança típica vira um comando seu | 2–3 dias |
@@ -47,6 +47,7 @@ qualquer sessão (**corrigido**, ver o Andamento), conseguir **verificar** o que
 | 2026-11-07 | 0.5 Permissões | `.claude/settings.json`: saíram `git -C repos/*` e `git branch:*`; entraram subcomandos git de leitura; `ask` para push, `reset --hard`, `clean`, `restore`, `branch -D`, `stash drop` e `gh pr create`; `deny` ampliado (`kubectl`/`helm`/`aws` mutantes, `terraform state`/`import`, `gh pr merge`, `gh api -X`, force push, push em `main`/`develop`, leitura de `.env` e `*.tfstate`). |
 | 2026-11-07 | 2 (texto) | `AGENTS.md` deixou de dizer que o `JwtProvider` é "cópia byte a byte": o que é idêntico é o token. |
 | 2026-11-07 | 1 Verificação local | `tooling/Dockerfile` + `bin/tooling`: imagem com PHP 8.2, Composer 2.7, Terraform 1.9.8, tflint, kustomize 5.4.3, actionlint e shellcheck. `bin/ws verify` (`bin/verify.py`): os passos do `pr.yml` dos 4 repos em paralelo, incluindo as migrations duas vezes num MySQL 8.0, em **~25 s**, com `.ws/verify/latest.json`. Também `bin/ws exec`, `context`, `ci`, `diff`, `prs --branch`, `branch`, `isolate` e `doctor`. Testado: tudo verde nos 4 repos; defeito plantado (`terraform fmt`) vira vermelho com o diff; `isolate`/`--rm` ida e volta; nenhum arquivo dos repos fica alterado. |
+| 2026-11-07 | 2 Contratos | `bin/check-contracts.py` virou CLI de `tools/contratos/`: 8 famílias (ssm, jwt, rotas, segredos, k8s, migrations, nomes, docs) e 18 checagens, com `--json` e `--only`. Erros conhecidos e aceitos ficam em `tools/contratos/conhecidos.txt`, com motivo. São 33 testes com fixtures em `tests/test_contratos.py`, e desligar qualquer família faz de 3 a 6 testes falharem. Rodando nos repos reais, achou: o webhook de aprovação inalcançável pelo gateway (achado 19, registrado como conhecido), o §5 do `CONTRATOS.md` desatualizado (achado 20) e a versão do Terraform diferente no gateway (achado 12). Skill `checar-contratos` e subagente `guardiao-de-contratos` passaram a partir do `--json`; os testes entraram no `bin/ws verify`. |
 | 2026-11-07 | 5.1 (antecipado) | Skill `status-geral` usava `gh run list --branch`, que não existe no `gh` 2.4 desta máquina: passou a usar `bin/ws context` e `bin/ws ci`. `mudanca-cross-repo` passou a usar `ws branch`/`isolate`/`verify`/`diff`/`prs --branch`. `AGENTS.md`, `README` e `Makefile` (`make verify`, `make doctor`) atualizados. |
 
 ---
@@ -79,13 +80,15 @@ qualquer sessão (**corrigido**, ver o Andamento), conseguir **verificar** o que
 | 8 | P1 | Não há comando único de verificação nem saída para máquina | O agente monta a sequência por repo a partir de uma tabela em prosa. | Verificação inconsistente, falha difícil de resumir. | ✅ |
 | 9 | P1 | Quase nenhum hook | Só o `SessionStart` novo. | Nada formata, nada bloqueia de verdade, nada obriga a verificar antes de encerrar. | aberto (Fase 3) |
 | 10 | P1 | Repos de produto sem `AGENTS.md`/`CLAUDE.md` | Nenhum dos quatro tem. Todo o contexto (20 KB) carrega inteiro em toda sessão. O `.gitignore` da app ignora `.claude/` inteiro. | Sessão aberta direto num repo não sabe nada; toda sessão paga 20 KB de contexto. | aberto (Fase 4) |
-| 11 | P1 | Checagem de contrato só cobre SSM | A skill `checar-contratos` faz à mão o token do JWT, as rotas públicas, o `ClusterSecretStore`, as chaves dos segredos e o RBAC. | A checagem depende de o agente lembrar. | aberto (Fase 2); texto do JWT ✅ |
+| 11 | P1 | Checagem de contrato só cobre SSM | A skill `checar-contratos` faz à mão o token do JWT, as rotas públicas, o `ClusterSecretStore`, as chaves dos segredos e o RBAC. | A checagem depende de o agente lembrar. | ✅ (Fase 2) |
 | 12 | P2 | Drift entre os CIs | Terraform `1.9.5` no gateway e `1.9.8` nos outros; `tflint` com `continue-on-error`; cache do Composer do gateway pela chave `composer.json`. | Comportamento diferente entre repos. | aberto (1.3) |
 | 13 | P2 | `gh` 2.4.0, de 2022 | `gh --version`. Não tem `gh run list --branch`, e a skill `status-geral` dependia disso. | O passo de CI da skill nunca funcionou nesta máquina. | ✅ contornado (`bin/ws ci` usa a API REST); atualizar o `gh` continua recomendado (`bin/ws doctor` avisa) |
 | 14 | P2 | Memória vazia e nenhum ciclo de aprendizado | `memory/` vazio. | O erro corrigido hoje volta amanhã. | aberto (4.6, 7.3) |
 | 15 | P2 | Placeholders que o pipeline substitui | O `deploy.yml` faz `sed` em `TARGET_GROUP_ARN_PLACEHOLDER` e `APP_IMAGE_PLACEHOLDER` dentro de `deploy/base/`. | Um agente que "conserte" o placeholder quebra o deploy em silêncio. | aberto (2, 3.3, 4.3) |
 | 16 | **P0** | CI que usa AWS está quebrado em `develop` | `bin/ws ci develop`: o `Deploy` da app (2026-11-08) e o `PR` do cluster (`terraform plan`) falham com `Could not assume role with OIDC: Not authorized to perform sts:AssumeRoleWithWebIdentity`. Os roles `oficina-gha-*` são criados fora destes repos. Hipótese: a policy de confiança ainda exige `repo:bregaldahq/<nome-antigo>:*` no `sub`, e o token do GitHub passou a trazer o nome novo depois da renomeação. Para conferir: `aws iam get-role --role-name oficina-gha-oficina-mecanica-tech-challenge --query Role.AssumeRolePolicyDocument`. | Nenhum deploy nem plan funciona; um agente corrigindo CI não tem como resolver isso. | aberto (é com você: IAM fora dos repos) |
 | 17 | P2 | Lockfile do Terraform não versionado | A fundação e o cluster têm `.terraform.lock.hcl` no `.gitignore`; só o gateway versiona. | Cada run de CI resolve os providers de novo: o plan de hoje pode usar outro provider que o de ontem. | aberto (PR na fundação e no cluster, se você quiser) |
+| 19 | **P1** | Webhook de aprovação inalcançável pelo gateway | `POST /api/service-orders/{id}/approval` é público na app (`public/index.php:139`, protegido por `X-Webhook-Token`), mas no gateway só passa pelo `ANY /api/{proxy+}`, que exige `Authorization`. Sem esse header, o HTTP API responde 401 antes de chamar o authorizer, e o webhook não está nem no `PUBLIC_ROUTES` do authorizer. As sondas e o login já ganharam rota dedicada por esse mesmo motivo. Achado pelo `ROTA-1`. | Quem chamar o webhook de fora recebe 401. | aberto: precisa de rota dedicada no `apigateway.tf` (PR no gateway); hoje em `conhecidos.txt` |
+| 20 | P2 | §5 do `CONTRATOS.md` desatualizado | A tabela do API Gateway lista 2 rotas; o `apigateway.tf` tem 8 (sondas, login, `/docs`, `/swagger.yaml`). O texto ainda diz que o login passa pelo `{proxy+}`. Achado pelo `ROTA-2` (6 avisos). | Quem lê o contrato tira conclusão errada sobre o gateway. | aberto: adendo no `CONTRATOS.md` (PR na app) |
 | 18 | P2 | Cache do php-cs-fixer versionado | `.php-cs-fixer.cache` está no Git da app; o dry-run o reescreve. | Sujeira em todo `make lint`. O `verify` usa `--using-cache=no`. | aberto (PR pequeno na app) |
 
 ---
@@ -302,7 +305,7 @@ Hoje ele aponta:
 
 ---
 
-### Fase 2 — Checagem de contrato completa · 2 dias
+### Fase 2 — Checagem de contrato completa · ✅ feita
 
 **Objetivo:** tudo o que a skill `checar-contratos` faz à mão vira checagem determinística, com
 arquivo e linha dos dois lados e a seção do `CONTRATOS.md` violada.
@@ -336,6 +339,21 @@ Python.
 
 **Aceite:** `bin/check-contracts.py --json` dá 0 erros com os repos em `develop`, e cada fixture
 de violação faz o script sair com 1.
+
+**Como ficou (2026-11-07).** Implementado como na tabela, com quatro ajustes:
+
+- **Severidade:** `erro` quando as implementações discordam (quebra em runtime) e `aviso` quando
+  o documento está desatualizado. Assim, uma divergência só de documentação não trava o
+  trabalho.
+- **Divergência de documento ganhou IDs próprios:** `SSM-4`, `SEG-2`, `ROTA-2` (tabela do
+  gateway), `ROTA-3` (matriz da app) e `ROTA-4` (`security: []` do swagger).
+- **`MIG-2` só aponta coluna que um repositório PDO usa:** os testes não precisam do schema
+  inteiro.
+- **`tools/contratos/conhecidos.txt`:** um erro aceito, com motivo, vira `conhecido`. Sem isso,
+  um bug antigo deixaria o `verify` vermelho para sempre e travaria o hook `Stop` da Fase 3 em
+  toda sessão. Hoje tem uma linha, o achado 19.
+
+O `ws verify` roda `tests/` no passo `testes` do workspace.
 
 ---
 
@@ -612,7 +630,7 @@ deveria cair, e a mesma lição não deveria aparecer duas vezes.
 | 3 | IA automatizada no GitHub e rotinas agendadas? | **respondida:** não; uso interativo pelo Claude Code |
 | 4 | Ligar `enforce_admins` e checks obrigatórios em `main` e `develop` (0.6)? Você também perde o merge forçado. | aberta |
 | 5 | Você cria um perfil AWS só-leitura para o agente? (Eu não crio recurso na AWS.) | aberta |
-| 6 | Posso abrir os PRs nos repos de produto que o plano prevê (1.1 Makefile/`php.sh`, 1.3 scripts de CI, achados 17 e 18, Fase 4.1 `AGENTS.md` por repo)? Ficam como draft para `develop`. | aberta |
+| 6 | Posso abrir os PRs nos repos de produto que o plano prevê (1.1 Makefile/`php.sh`, 1.3 scripts de CI, achados 17 a 20 — inclusive a rota do webhook e o adendo ao §5 —, Fase 4.1 `AGENTS.md` por repo)? Ficam como draft para `develop`. | aberta |
 | 7 | Achado 16: conferir a policy de confiança dos roles `oficina-gha-*` (OIDC falhando em `develop`). Só você tem acesso. | aberta |
 
 ## 6. Fora do escopo

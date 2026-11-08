@@ -135,7 +135,12 @@ def app_image(repo: Path, log: TextIO) -> bool:
 
 
 def python_compiles(repo: Path, log: TextIO) -> bool:
-    return sh([sys.executable, "-m", "py_compile", *map(str, sorted(repo.glob("bin/*.py")))], log)
+    files = sorted([*repo.glob("bin/*.py"), *repo.glob("tools/**/*.py"), *repo.glob("tests/*.py")])
+    return sh([sys.executable, "-m", "py_compile", *map(str, files)], log)
+
+
+def unittests(repo: Path, log: TextIO) -> bool:
+    return sh([sys.executable, "-m", "unittest", "discover", "-s", str(repo / "tests")], log, cwd=repo)
 
 
 def contracts(repo: Path, log: TextIO) -> bool:
@@ -181,6 +186,7 @@ STEPS: dict[str, list[Step]] = {
     WORKSPACE: [
         Step("shellcheck", tool("shellcheck bin/ws bin/tooling .claude/hooks/*.sh"), "-"),
         Step("python", python_compiles, "-"),
+        Step("testes", unittests, "tests/ (checker de contratos)"),
         Step("contratos", contracts, "bin/check-contracts.py"),
     ],
 }

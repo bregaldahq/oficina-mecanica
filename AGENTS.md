@@ -301,8 +301,15 @@ Outros pontos de contato que quebram em silêncio se um lado mudar:
   `/swagger.yaml`) existem como rota dedicada no gateway (repo da Lambda) **e** na matriz de
   autorização da aplicação.
 
-`bin/check-contracts.py` confere o primeiro item automaticamente: parâmetro consumido sem dono,
-parâmetro com dois donos e parâmetro publicado que ninguém lê.
+`bin/check-contracts.py` confere todos esses pontos, e mais o `ClusterSecretStore`, o RBAC das
+CRDs da app, os placeholders do deploy, as migrations, os nomes antigos, as tags e o OIDC. Ele
+compara com o `CONTRATOS.md` e o `swagger.yaml` (o código fica em `tools/contratos/`, os testes em
+`tests/test_contratos.py`).
+
+- `erro`: as implementações discordam e algo quebra.
+- `aviso`: o documento está desatualizado.
+- `conhecido`: erro aceito, com motivo, em `tools/contratos/conhecidos.txt`. Não acrescente
+  linha ali sem o usuário decidir.
 
 ## Ferramentas do workspace
 
@@ -321,7 +328,7 @@ bin/ws branch <nome> <repo...>     # mesma branch nos repos indicados, a partir 
 bin/ws isolate <b> <repo...>       # worktrees próprios desta sessão (sessões paralelas)
 bin/ws doctor                      # confere Docker, ferramentas, clones e proteções de branch
 bin/ws run git log -3 --oneline
-bin/check-contracts.py             # acoplamento SSM consistente?
+bin/check-contracts.py [--json]    # os contratos entre os repos (SSM, JWT, rotas, segredos...)
 ```
 
 Onde um comando pede `<repo>`, vale o nome curto: `fundacao`, `cluster`, `gateway`, `api`.
@@ -357,7 +364,7 @@ IaC é `fmt` + `validate` sem backend.
 - **gateway:** composer, contrato do JWT, phpunit, phpstan, `fmt` e `validate`;
 - **aplicação:** composer, php-cs-fixer, phpstan, phpunit e `kustomize build` dos dois overlays,
   e o build da imagem de produção com `--image`;
-- **workspace:** shellcheck, Python e `check-contracts`.
+- **workspace:** shellcheck, Python, os testes de `tests/` e `check-contracts`.
 
 O `actionlint` roda em todos os repos como aviso. Leva cerca de 30 s com tudo; `--changed` olha
 só os repos com mudança, e `--fast` pula as migrations. O resultado vai para
