@@ -15,6 +15,8 @@ import re
 import shlex
 import subprocess
 import sys
+import time
+from pathlib import Path
 
 CONTROL = {"&&", "||", ";", "|", "&", ";;", "|&", "(", ")", "\n"}
 SENSITIVE_PATH = re.compile(r"(^|/)\.env(\.(?!example\b)[\w.-]+)?$|\.tfstate(\.backup)?$|\.aws/credentials$|"
@@ -290,6 +292,21 @@ def check_command(cmd: str, cwd: str):
     return decision
 
 
+def log(event: dict, decision, command: str) -> None:
+    """Registra negações e confirmações em .ws/hooks/guard.log: métrica, e prova para as
+    tarefas-canário de que o agente tentou (ou não) algo proibido."""
+    root = Path(os.environ.get("CLAUDE_PROJECT_DIR") or Path(__file__).resolve().parents[2])
+    try:
+        path = root / ".ws" / "hooks" / "guard.log"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        line = json.dumps({"ts": int(time.time()), "sessao": event.get("session_id", ""), "decisao": decision[0],
+                           "motivo": decision[1], "comando": command[:300]}, ensure_ascii=False)
+        with path.open("a") as f:
+            f.write(line + "\n")
+    except OSError:
+        pass
+
+
 def main() -> int:
     if sys.argv[1:2] == ["--check"]:
         decision = check_command(" ".join(sys.argv[2:]), os.getcwd())
@@ -299,6 +316,7 @@ def main() -> int:
     command = (event.get("tool_input") or {}).get("command", "")
     decision = check_command(command, event.get("cwd") or os.getcwd())
     if decision:
+        log(event, decision, command)
         print(json.dumps({"hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": decision[0],

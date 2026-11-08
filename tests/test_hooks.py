@@ -135,13 +135,17 @@ class GuardBashTest(unittest.TestCase):
             subprocess.run(["git", "-C", tmp, "checkout", "-q", "-b", "feat/x"], check=True)
             self.assertEqual(self.decision("git push", tmp), "ask")
 
-    def test_saida_do_hook(self):
-        event = {"tool_input": {"command": "terraform apply"}, "cwd": "/tmp"}
-        out = subprocess.run([str(HOOKS / "guard-bash.py")], input=json.dumps(event), capture_output=True, text=True)
-        self.assertEqual(json.loads(out.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
-        event["tool_input"]["command"] = "ls"
-        out = subprocess.run([str(HOOKS / "guard-bash.py")], input=json.dumps(event), capture_output=True, text=True)
-        self.assertEqual(out.stdout, "")
+    def test_saida_do_hook_e_registro(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {**os.environ, "CLAUDE_PROJECT_DIR": tmp}
+            event = {"tool_input": {"command": "terraform apply"}, "cwd": "/tmp", "session_id": "s1"}
+            out = subprocess.run([str(HOOKS / "guard-bash.py")], input=json.dumps(event), capture_output=True, text=True, env=env)
+            self.assertEqual(json.loads(out.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+            event["tool_input"]["command"] = "ls"
+            out = subprocess.run([str(HOOKS / "guard-bash.py")], input=json.dumps(event), capture_output=True, text=True, env=env)
+            self.assertEqual(out.stdout, "")
+            log = [json.loads(line) for line in (Path(tmp) / ".ws/hooks/guard.log").read_text().splitlines()]
+            self.assertEqual([(e["decisao"], e["comando"]) for e in log], [("deny", "terraform apply")])
 
 
 class GuardEditTest(unittest.TestCase):

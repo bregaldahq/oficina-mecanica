@@ -20,6 +20,8 @@
 #   bin/ws isolate --rm             desfaz o isolate (as branches continuam)
 #   bin/ws doctor                   confere o ambiente: Docker, ferramentas, clones, proteções
 #   bin/ws hooks [install|uninstall] git hooks de githooks/ (commit-msg, pre-push) nos repos
+#   bin/ws statusline               uma linha para a status line do Claude Code (sem rede)
+#   bin/ws eval [list|setup|grade|clean] <n>  tarefas-canário de evals/ (ver evals/README.md)
 #   bin/ws run <comando...>         executa o comando dentro de cada repo
 #
 set -euo pipefail
@@ -462,6 +464,100 @@ cmd_hooks() {
   done
 }
 
+# Branch de cada repo (* = mudança não commitada) e o último bin/ws verify. Sem rede: roda a
+# cada atualização da status line.
+cmd_statusline() {
+  [[ -t 0 ]] || cat > /dev/null  # o Claude Code manda o JSON da sessão; não precisamos dele
+  local parts=() name dir branch mark latest result age
+  for name in $(repos); do
+    dir="$REPOS_DIR/$name"
+    [[ -d "$dir" ]] || continue
+    branch="$(git -C "$dir" branch --show-current 2>/dev/null)"
+    branch="${branch:-HEAD}"
+    (( ${#branch} > 24 )) && branch="${branch:0:23}…"
+    mark=""
+    [[ -n "$(git -C "$dir" status --porcelain --untracked-files=no 2>/dev/null)" ]] && mark="*"
+    parts+=("$(short "$name"):$branch$mark")
+  done
+  latest="$ROOT/.ws/verify/latest.json"
+  if [[ -f "$latest" ]]; then
+    grep -q '"ok": true' "$latest" && result="verify ✓" || result="verify ✗"
+    age=$(( ($(date +%s) - $(stat -c %Y "$latest")) / 60 ))
+    if (( age < 60 )); then result+=" ${age}min"; else result+=" $(( age / 60 ))h"; fi
+  else
+    result="verify -"
+  fi
+  echo "${parts[*]} │ $result"
+}
+
+# Tarefas-canário (evals/README.md). setup isola os repos da tarefa na branch eval/<tarefa> e
+# planta o defeito; grade dá a nota; clean apaga worktrees e branch, mesmo com mudanças, porque
+# são descartáveis.
+cmd_eval() {
+  local action="${1:-list}" arg dir slug main name rc
+  if [[ "$action" == list ]]; then
+    for dir in "$ROOT"/evals/[0-9]*/; do
+      printf '%-26s %s\n' "$(basename "$dir")" "$(head -1 "$dir/task.md" | sed 's/^# //')"
+    done
+    return
+  fi
+  arg="${2:?uso: bin/ws eval $action <número>}"
+  [[ "$arg" =~ ^[0-9]$ ]] && arg="0$arg"
+  dir="$(compgen -G "$ROOT/evals/$arg*" | head -1 || true)"
+  [[ -n "$dir" && -f "$dir/task.md" ]] || { echo "tarefa não encontrada: $arg (bin/ws eval list)"; exit 1; }
+  slug="$(basename "$dir")"
+  main="$(main_checkout)"
+  mkdir -p "$ROOT/.ws/evals"
+  # shellcheck disable=SC2046
+  set -- $(cat "$dir/repos")
+  case "$action" in
+    setup)
+      cmd_isolate "eval/$slug" "$@"
+      if [[ -x "$dir/setup.sh" ]]; then
+        REPOS="$ROOT/repos" WS="$ROOT" "$dir/setup.sh"
+      fi
+      date +%s > "$ROOT/.ws/evals/$slug.inicio"
+      echo
+      echo "Pronto. Rode /clear e cole o pedido abaixo; depois, bin/ws eval grade $arg."
+      echo "────────────────────────────────────────"
+      tail -n +3 "$dir/task.md"
+      ;;
+    grade)
+      rc=0
+      REPOS="$ROOT/repos" WS="$ROOT" SINCE="$(cat "$ROOT/.ws/evals/$slug.inicio" 2>/dev/null || echo 0)" \
+        bash "$dir/grade.sh" | tee "$ROOT/.ws/evals/$slug.nota" || rc=$?
+      printf '{"data": "%s", "tarefa": "%s", "ok": %s, "nota": "%s"}\n' "$(date -Iseconds)" "$slug" \
+        "$([[ $rc == 0 ]] && echo true || echo false)" "$(tail -1 "$ROOT/.ws/evals/$slug.nota")" \
+        >> "$ROOT/.ws/evals/resultados.jsonl"
+      return "$rc"
+      ;;
+    clean)
+      for name in "$@"; do
+        name="$(resolve "$name")"
+        if [[ -f "$ROOT/repos/$name/.git" ]] && [[ "$(git -C "$ROOT/repos/$name" branch --show-current)" == "eval/$slug" ]]; then
+          git -C "$main/repos/$name" worktree remove --force "$ROOT/repos/$name"
+          ln -s "$main/repos/$name" "$ROOT/repos/$name"
+        fi
+        git -C "$main/repos/$name" branch -q -D "eval/$slug" 2>/dev/null || true
+        echo "== $name: eval/$slug apagada"
+      done
+      # Sem nenhum worktree isolado (o .git deles é arquivo; o dos clones é diretório), repos/
+      # volta a ser um symlink só.
+      if [[ -d "$ROOT/repos" && ! -L "$ROOT/repos" ]]; then
+        local isolated=0
+        for name in $(repos); do [[ -f "$ROOT/repos/$name/.git" ]] && isolated=1; done
+        if (( ! isolated )); then
+          rm -f "$ROOT"/repos/*
+          rmdir "$ROOT/repos"
+          ln -s "$main/repos" "$ROOT/repos"
+        fi
+      fi
+      rm -f "$ROOT/.ws/evals/$slug.inicio"
+      ;;
+    *) echo "uso: bin/ws eval [list|setup|grade|clean] <número>"; exit 1 ;;
+  esac
+}
+
 run_one() {
   local name="$1"; shift
   echo "== $name"
@@ -494,6 +590,8 @@ case "${1:-}" in
   isolate) shift; cmd_isolate "$@" ;;
   doctor)  cmd_doctor ;;
   hooks)   shift; cmd_hooks "$@" ;;
+  statusline) cmd_statusline ;;
+  eval)    shift; cmd_eval "$@" ;;
   run)
     shift
     [[ $# -gt 0 ]] || { echo "uso: bin/ws run <comando...>"; exit 1; }

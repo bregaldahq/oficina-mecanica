@@ -327,6 +327,9 @@ bin/ws exec <repo> <cmd...>        # comando na imagem de ferramentas (PHP, Comp
 bin/ws branch <nome> <repo...>     # mesma branch nos repos indicados, a partir de origin/develop
 bin/ws isolate <b> <repo...>       # worktrees próprios desta sessão (sessões paralelas)
 bin/ws doctor                      # confere Docker, ferramentas, clones e proteções de branch
+bin/ws hooks install               # git hooks de convenção (commit-msg, pre-push) nos cinco repos
+bin/ws statusline                  # a linha da status line (branch de cada repo, último verify)
+bin/ws eval [list|setup|grade|clean] <n>   # tarefas-canário (evals/README.md)
 bin/ws run git log -3 --oneline
 bin/check-contracts.py [--json]    # os contratos entre os repos (SSM, JWT, rotas, segredos...)
 ```
@@ -466,6 +469,17 @@ Uma mudança só está pronta, e só sai em PR, quando:
    - o que só o CI consegue verificar (`terraform plan`, deploy, smoke).
 
 Os PRs saem com `/abrir-prs`, e só quando o usuário pedir.
+
+## Como evoluir este harness
+
+- **Correção do usuário vira prevenção** (`/registrar-licao`), nesta ordem de preferência: teste
+  > checagem em `tools/contratos/` > hook > `AGENTS.md` do repo > este `AGENTS.md` > memória.
+  Cada registro ganha uma linha em `docs/LICOES.md`.
+- **Mudou `AGENTS.md`, skill, hook ou checker?** Rode antes e depois as tarefas-canário afetadas
+  (`bin/ws eval`, `evals/README.md`). Se a nota piorar, a mudança volta.
+- **Tudo em `bin/`, `tools/`, `.claude/hooks/` e `githooks/` tem teste em `tests/`**, rodado
+  pelo `bin/ws verify --repo workspace`. O plano e o histórico das decisões estão em
+  `docs/PLANO-HARNESS-IA.md`.
 
 ## Regras para agentes
 

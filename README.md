@@ -113,12 +113,14 @@ bin/ws link ~/caminho/onde/estao/os/clones
 | `bin/verify.py` | o `bin/ws verify`: os passos do `pr.yml` de cada repo, em paralelo, com resultado em `.ws/verify/latest.json` |
 | `bin/tooling`, `tooling/Dockerfile` | imagem com PHP 8.2, Composer, Terraform 1.9.8, tflint, kustomize, actionlint e shellcheck |
 | `bin/check-contracts.py`, `tools/contratos/` | confere os contratos entre os repos (SSM, segredos, JWT, rotas, migrations, RBAC, nomes antigos) contra o código e o `CONTRATOS.md`; testes em `tests/` |
-| `.claude/skills/` | `status-geral`, `mudanca-cross-repo`, `checar-contratos` |
-| `.claude/agents/` | `guardiao-de-contratos`, revisor de diffs contra o `CONTRATOS.md` |
+| `.claude/skills/` | 15 comandos (`/verificar`, `/nova-migration`, `/abrir-prs`...); o catálogo está em "Comandos" no `AGENTS.md` |
+| `.claude/agents/` | `guardiao-de-contratos`, `revisor-ddd`, `revisor-terraform` e `verificador` |
 | `.claude/settings.json` | libera comandos de leitura, pede confirmação para push e operações git destrutivas, e bloqueia `apply`, `destroy`, `kubectl`/`helm`/`aws` mutantes, merge, deploy manual e leitura de segredos |
 | `.claude/hooks/` | guarda de Bash e de edição, lembretes de contrato, `verify` ao encerrar e retrato dos repos no início da sessão (`AGENTS.md`, "Guardrails executados") |
 | `githooks/` | `commit-msg` e `pre-push` para os cinco repos: `bin/ws hooks install` |
-| `tests/` | testes do checker de contratos e dos hooks (`python3 -m unittest discover -s tests`) |
+| `tests/` | testes do checker, dos hooks e do contexto (`python3 -m unittest discover -s tests`) |
+| `evals/` | tarefas-canário com nota determinística, para medir mudanças no harness (`bin/ws eval`) |
+| `templates/pr-body.md` | corpo dos PRs abertos pelo `/abrir-prs` |
 | `docs/PLANO-HARNESS-IA.md` | plano de evolução do harness de IA |
 
 ## Princípios

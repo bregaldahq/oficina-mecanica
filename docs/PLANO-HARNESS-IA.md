@@ -34,8 +34,8 @@ qualquer sessão (**corrigido**, ver o Andamento), conseguir **verificar** o que
 | 3 | Hooks e guardrails | regra escrita vira regra executada; toda sessão termina verificada | ✅ |
 | 4 | Contexto em camadas | contexto certo, na hora certa, mais barato | ✅ (PRs e 4.2 pendentes) |
 | 5 | Comandos: skills e subagentes | cada mudança típica vira um comando seu | ✅ |
-| 6 | A sessão interativa | menos interrupção, status visível, sessões paralelas | ½ dia |
-| 7 | Medir e melhorar o harness | saber se cada mudança no harness ajudou | 1 dia + contínuo |
+| 6 | A sessão interativa | menos interrupção, status visível, sessões paralelas | ✅ |
+| 7 | Medir e melhorar o harness | saber se cada mudança no harness ajudou | ✅ (falta a rodada de referência) |
 | 8 | Avançado (opcional) | e2e entre repos sem AWS, MCP | sob demanda |
 
 ## Andamento
@@ -52,6 +52,8 @@ qualquer sessão (**corrigido**, ver o Andamento), conseguir **verificar** o que
 | 2026-11-07 | 4 Contexto | `AGENTS.md` + `CLAUDE.md` (`@AGENTS.md`) escritos para os 4 repos de produto, a partir de `develop`, na branch local **`chore/agents-md`** de cada um (commitada, **sem push**). Cobrem o que o repo cria, os contratos que publica e consome (conferidos no `data.tf`/`ssm.tf`), como validar sem AWS, as armadilhas (sintoma → causa → o que pega), as convenções e, na app, o glossário. Hook novo `repo-context.py` (PostToolUse de Read/Edit/Write/Grep/Glob) injeta o `AGENTS.md` do repo uma vez por sessão. O DOC-1 passou a conferir os caminhos citados nesses arquivos. O `AGENTS.md` do workspace dizia nodes `t3.small`; em `develop` são `t3.medium` (corrigido). |
 | 2026-11-07 | Achados ao rodar em `develop` | Falso positivo do `NOME-1` com comentário no fim da linha da tag (corrigido, com teste). O `deploy.yml` da fundação em `develop` é YAML inválido (achado 21): a correção ficou na branch local **`fix/deploy-yml-invalido`** (sem push). O passo do actionlint no `verify` passou a ser `workflows`, bloqueante e sem o shellcheck embutido. |
 | 2026-11-07 | 5 Comandos | 12 skills novas: `verificar`, `nova-migration`, `novo-endpoint`, `mudar-jwt`, `novo-parametro-ssm`, `novo-segredo`, `corrigir-ci`, `abrir-prs`, `revisar-pr`, `release`, `atualizar-dependencias` e `registrar-licao`. Mais `templates/pr-body.md` e 3 subagentes novos: `verificador` (haiku), `revisor-ddd` e `revisor-terraform`. Cada receita cita os arquivos e padrões reais (conferidos: o padrão `PREPARE`/`EXECUTE` do `002`, `requireRole('customer', 'admin')`, `RequestValidator`, a IRSA do ESO). Definição de Pronto e catálogo de comandos no `AGENTS.md`. `tests/test_contexto.py` confere o frontmatter, que skills e subagentes citados existem e que os hooks do settings existem e são executáveis. |
+| 2026-11-08 | 6 Sessão interativa | Catálogo de comandos no `AGENTS.md` (6.1). `bin/ws statusline` (6.2): branch de cada repo, `*` para mudança não commitada e o último `verify`, em 45 ms e sem rede, configurado em `statusLine`. 6.3 e 6.4 foram cobertos pelas permissões das Fases 0 e 1 e pelo `ws isolate`. |
+| 2026-11-08 | 7 Medir | 8 tarefas-canário em `evals/`, com `bin/ws eval list/setup/grade/clean`. O `guard-bash` registra negações e confirmações em `.ws/hooks/guard.log`, o que serve de métrica e de prova na tarefa 08. Notas validadas: as tarefas com defeito plantado (05, 06, 07) reprovam antes da correção e passam depois; a 03 passa com a primeira etapa certa do rename; a 08 reprova quando há tentativa no log; as de construção (01, 02, 04) reprovam sem nada feito. Seção "Como evoluir este harness" no `AGENTS.md`. **Falta a primeira rodada de referência com um agente de verdade, numa sessão sua** (ver o 7.2). |
 | 2026-11-07 | 5.1 (antecipado) | Skill `status-geral` usava `gh run list --branch`, que não existe no `gh` 2.4 desta máquina: passou a usar `bin/ws context` e `bin/ws ci`. `mudanca-cross-repo` passou a usar `ws branch`/`isolate`/`verify`/`diff`/`prs --branch`. `AGENTS.md`, `README` e `Makefile` (`make verify`, `make doctor`) atualizados. |
 
 ---
@@ -549,7 +551,7 @@ intervir até o resumo final.
 
 ---
 
-### Fase 6 — A sessão interativa · ½ dia
+### Fase 6 — A sessão interativa · ✅ feita
 
 **Objetivo:** menos interrupção, mais visibilidade e sessões paralelas sem conflito.
 
@@ -594,7 +596,19 @@ mudança perguntam isso quando o `ws context` mostra outro repo sujo numa branch
 
 ---
 
-### Fase 7 — Medir e melhorar o harness · 1 dia + contínuo
+### Fase 7 — Medir e melhorar o harness · ✅ arcabouço pronto; falta a rodada de referência
+
+> **Como ficou (2026-11-08).**
+>
+> - **7.1:** `tests/` (contratos, hooks, contexto) roda no `bin/ws verify --repo workspace`.
+> - **7.2:** as 8 tarefas, com `setup`/`grade`/`clean`. A tarefa 04 virou "claim `channel`" em
+>   vez de `plate`: `plate` exigiria consulta nova ao banco e mediria outra coisa. A armadilha
+>   dela é o agente trocar o token literal do teste de contrato sem necessidade.
+> - **7.3:** `/registrar-licao` e a seção "Como evoluir este harness" no `AGENTS.md`.
+>
+> A **rodada de referência** é sua: numa sessão nova (em worktree), para cada tarefa, rode
+> `bin/ws eval setup <n>`, depois `/clear`, cole o pedido e rode `bin/ws eval grade <n>`. Os
+> resultados ficam em `.ws/evals/resultados.jsonl`.
 
 **Objetivo:** saber se cada mudança em `AGENTS.md`, skill ou hook ajudou, sem achismo.
 

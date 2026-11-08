@@ -187,7 +187,7 @@ STEPS: dict[str, list[Step]] = {
         Step("workflows", ACTIONLINT, "fora do CI: workflow inválido nem carrega no GitHub"),
     ],
     WORKSPACE: [
-        Step("shellcheck", tool("shellcheck bin/ws bin/tooling .claude/hooks/*.sh githooks/*"), "-"),
+        Step("shellcheck", tool("shellcheck -x bin/ws bin/tooling .claude/hooks/*.sh githooks/* evals/lib.sh evals/*/*.sh"), "-"),
         Step("python", python_compiles, "-"),
         Step("testes", unittests, "tests/ (checker de contratos)"),
         Step("contratos", contracts, "bin/check-contracts.py"),
