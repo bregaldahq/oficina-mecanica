@@ -53,6 +53,7 @@ qualquer sessão (**corrigido**, ver o Andamento), conseguir **verificar** o que
 | 2026-11-07 | Achados ao rodar em `develop` | Falso positivo do `NOME-1` com comentário no fim da linha da tag (corrigido, com teste). O `deploy.yml` da fundação em `develop` é YAML inválido (achado 21): a correção ficou na branch local **`fix/deploy-yml-invalido`** (sem push). O passo do actionlint no `verify` passou a ser `workflows`, bloqueante e sem o shellcheck embutido. |
 | 2026-11-07 | 5 Comandos | 12 skills novas: `verificar`, `nova-migration`, `novo-endpoint`, `mudar-jwt`, `novo-parametro-ssm`, `novo-segredo`, `corrigir-ci`, `abrir-prs`, `revisar-pr`, `release`, `atualizar-dependencias` e `registrar-licao`. Mais `templates/pr-body.md` e 3 subagentes novos: `verificador` (haiku), `revisor-ddd` e `revisor-terraform`. Cada receita cita os arquivos e padrões reais (conferidos: o padrão `PREPARE`/`EXECUTE` do `002`, `requireRole('customer', 'admin')`, `RequestValidator`, a IRSA do ESO). Definição de Pronto e catálogo de comandos no `AGENTS.md`. `tests/test_contexto.py` confere o frontmatter, que skills e subagentes citados existem e que os hooks do settings existem e são executáveis. |
 | 2026-11-08 | 0.6 AWS como código | O ambiente AWS foi derrubado, e é por isso que o OIDC falha (achado 16). `bootstrap/aws/` tem tudo o que a conta precisa antes de qualquer CI: bucket `oficina-tfstate-<sufixo>` e tabela `oficina-tflock`, provider OIDC do GitHub, um role por repo (nome antigo, `sub` com o nome novo, só PR, environments e `develop`/`main`) e o role `oficina-agent-readonly` (ReadOnlyAccess, sem segredo, KMS nem state). Mais o `github.sh` (secrets e environments; só executa com `--apply` e confirmação no terminal) e o README com a sequência para reerguer o sistema. `AWS_PROFILE=oficina-readonly` no settings. Validado com `terraform validate`; o `verify` do workspace roda o bootstrap e o `tests/test_bootstrap.py` amarra os nomes ao contrato. **Não aplicado:** é com você, com credencial de administrador. |
+| 2026-11-08 | Depois dos merges | Os 11 PRs entraram em `develop`, e o `develop` novo está verde: `check-contracts` com 0 erros e 0 conhecidos, `verify` OK nos 4 repos (inclusive o `workflows` da fundação) e `e2e` 17/17. Seção 5.1 feita: linha do webhook fora de `conhecidos.txt`; os quatro clones em `develop`, com o `AGENTS.md` de cada repo no disco; 4.2: `AGENTS.md` do workspace de 31,5 KB para 21,4 KB, com a seção "Como funciona cada repo" resumida e o detalhe nos repos. Os 8 KB da meta cortariam regras que valem para os quatro repos. Os `AGENTS.md` da fundação e do cluster diziam que o lock era ignorado: PRs [fundação #13](https://github.com/bregaldahq/oficina-infra-fundacao/pull/13) e [cluster #16](https://github.com/bregaldahq/oficina-infra-cluster/pull/16). |
 | 2026-11-08 | Decisões executadas | **6:** 11 PRs draft para `develop`, publicados de worktrees isolados (o `pre-push` verificou cada árvore): fundação [#10](https://github.com/bregaldahq/oficina-infra-fundacao/pull/10), [#11](https://github.com/bregaldahq/oficina-infra-fundacao/pull/11), [#12](https://github.com/bregaldahq/oficina-infra-fundacao/pull/12); cluster [#14](https://github.com/bregaldahq/oficina-infra-cluster/pull/14), [#15](https://github.com/bregaldahq/oficina-infra-cluster/pull/15); gateway [#11](https://github.com/bregaldahq/oficina-gateway-auth/pull/11), [#12](https://github.com/bregaldahq/oficina-gateway-auth/pull/12), [#13](https://github.com/bregaldahq/oficina-gateway-auth/pull/13); app [#24](https://github.com/bregaldahq/oficina-api/pull/24), [#25](https://github.com/bregaldahq/oficina-api/pull/25), [#26](https://github.com/bregaldahq/oficina-api/pull/26). **1:** os 2 commits antigos ficam nas branches locais `backup-antes-de-atualizar` e `feat/fase-2`, sem publicar: o `wip` põe no `.env.example` um `DB_PASSWORD` diferente do público, e o repo é público. Dos 3 worktrees velhos, saíram 2 (um limpo, outro só com uma cópia idêntica do `.docx`); ficou o `enable-pr-access`, com as notas internas staged. **2:** clones planos em `repos/` com os nomes novos (movidos, não reclonados: `.env`, `notas-internas/`, branches locais e git hooks foram junto), com symlink de compatibilidade em `/root/oficina-mecanica-tech-challenge`; `.ignore` faz o Grep da raiz enxergar os repos. **4:** não ligado: os 4 repos exigem 1 aprovação de review, e com `enforce_admins` você não conseguiria mergear o próprio PR (proposta na decisão 4). **`gh`:** a instalação pelo apt do GitHub CLI foi negada ao agente; comandos para você no fim da seção 7. |
 | 2026-11-08 | 8.1 E2E local | `bin/ws e2e` (`bin/e2e.py` + `tools/e2e/lambda.php`) faz 17 checagens em cerca de 30 s, sem AWS: MySQL 8.0, migrations da fundação pelo `bin/migrate.php` da app (duas vezes), app em `php -S`, login do admin, `auth-cpf` (200/400/404), `jwt-authorizer` (aceita o token do cliente e o do admin, recusa o adulterado), token da Lambda aceito pela app, 403 de cliente em rota de admin, webhook com token errado. O `.env` da app é coberto por `/dev/null`, e o e2e não lê nem usa seus valores. Mutação conferida: trocar `role` para `cliente` na `auth-cpf` derruba 2 checagens, e nenhum teste de contrato pegaria isso. 8.2 (MCP do Terraform) ficou de fora de propósito: o `terraform validate` do `verify` já pega argumento inválido, e um MCP a mais custaria contexto em toda sessão. |
 | 2026-11-08 | Repos de produto (branches locais, **sem push**) | Correções prontas e verificadas, uma branch por assunto (ver a decisão 6 para a lista e a ordem de merge): lockfile versionado na fundação e no cluster (achado 17); rota do webhook no gateway + adendo 7 do `CONTRATOS.md` na app (achados 19 e 20); Terraform 1.9.8 e cache do Composer pelo lock no gateway (achado 12); `make test`/`make stan` do gateway sem PHP local e `php.sh` da app que constrói a própria imagem (1.1); cache do php-cs-fixer fora do Git (achado 18); `php.sh`/`composer.sh` executáveis (achado 22). Com tudo isso em `develop`, o `check-contracts` fica com 0 erros e 0 conhecidos. |
@@ -699,12 +700,7 @@ deveria cair, e a mesma lição não deveria aparecer duas vezes.
 
 ## 5.1 Depois de cada merge
 
-| Quando entrar em `develop` | Atualizar no workspace |
-|---|---|
-| `fix/rota-do-webhook` (gateway e app) | tirar a linha do `ROTA-1` de `tools/contratos/conhecidos.txt` (o checker avisa) |
-| `chore/versionar-lockfile` | `AGENTS.md` (workspace e dos repos): o lock passa a ser versionado na fundação e no cluster |
-| `ci/verificacao-local` | `AGENTS.md`: o `make test`/`make stan` do gateway passam a funcionar sem PHP local, e o `scripts/php.sh` da app passa a ser executável |
-| `chore/agents-md` | 4.2: enxugar o `AGENTS.md` do workspace |
+✅ Feito em 2026-11-08 (ver o Andamento).
 
 ## 6. Fora do escopo
 
@@ -723,20 +719,13 @@ deveria cair, e a mesma lição não deveria aparecer duas vezes.
 
 ## 7. Próximos passos
 
-1. **Reerguer a AWS, quando você quiser:** aplicar `bootstrap/aws/` (README dele), rodar o `github.sh`, configurar o
-   perfil `oficina-readonly` e subir a fundação. Sem isso, nenhum deploy nem plan roda (achado
-   16).
-2. **Mergear `chore/harness-pos-merge`** no repositório principal (`.ignore`, `pre-push` e este
-   plano atualizado).
-3. **Revisar e mergear os 11 PRs** dos repos (ordem na decisão 6) e, depois de cada merge, a
-   seção 5.1.
-4. **Decisão 4:** ligar os checks obrigatórios pela interface do GitHub (lista na decisão).
-5. **Atualizar o `gh`** (2.4.0), no seu terminal:
-   `curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli-archive-keyring.gpg`,
-   depois `echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list`
-   e `apt update && apt install gh`.
-6. **Rodada de referência** das tarefas-canário (7.2), numa sessão nova.
-7. **Depois do merge dos `chore/agents-md`:** enxugar o `AGENTS.md` do workspace (4.2).
+1. **Mergear** os PRs [fundação #13](https://github.com/bregaldahq/oficina-infra-fundacao/pull/13)
+   e [cluster #16](https://github.com/bregaldahq/oficina-infra-cluster/pull/16) (só
+   documentação) e o deste workspace.
+2. **Decisão 4:** ligar os checks obrigatórios pela interface do GitHub (lista na decisão).
+3. **Rodada de referência** das tarefas-canário (7.2), numa sessão nova.
+4. **AWS, quando quiser:** `bootstrap/aws/README.md`. Quando voltar, os checks de `plan` entram na
+   lista de obrigatórios.
 
 ---
 
