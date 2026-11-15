@@ -19,7 +19,27 @@ PRs antigos, a chave do state do Terraform, os roles de CI (`oficina-gha-<nome-a
 | `repos/oficina-gateway-auth` | **Borda**: Lambdas `auth-cpf` e `jwt-authorizer` (PHP/Bref), API Gateway, VPC Link | PHP 8.2 + Terraform | ocasional |
 | `repos/oficina-api` | **Aplicação**: API REST em PHP puro (DDD, Clean Architecture), `deploy/` em kustomize, Job de migration | PHP 8.2 | diário |
 
-Ordem de `apply`: **fundação → cluster → gateway → api**. Ordem de `destroy`: inversa.
+| `repos/oficina-faturamento` | **Faturamento** (Fase 4, esqueleto): orçamento, estoque, pagamento; `deploy/` e `infra/` próprios | PHP 8.2 + Terraform | diário |
+| `repos/oficina-execucao` | **Execução** (Fase 4, esqueleto): fila da oficina, diagnóstico, reparo; `deploy/` e `infra/` próprios | PHP 8.2 + Terraform | diário |
+
+Ordem de `apply`: **fundação → cluster → gateway → api**, e depois cada serviço da Fase 4
+(`infra/`, depois deploy). Ordem de `destroy`: inversa.
+
+## Fase 4 em andamento
+
+O sistema está sendo dividido em três microsserviços: o `oficina-api` vira o serviço de OS (e
+orquestrador da saga), e nascem o `oficina-faturamento` e o `oficina-execucao`. O plano e o
+andamento estão em `docs/PLANO-FASE-4.md`; o desenho normativo, em
+`repos/oficina-api/docs/fase-4/` (`CONTRATOS.md`, ADRs 011 a 017, diagramas).
+
+- **O que roda em produção ainda é a Fase 3.** O resto deste arquivo descreve esse sistema. O
+  contrato da Fase 4 soma ao da Fase 3, e cada item só vale depois de implementado.
+- Os dois repos novos são esqueletos: respondem `health` e `ready` sob o próprio prefixo
+  (`/api/billing`, `/api/execution`) e já têm imagem, manifests, `infra/` e pipelines.
+- Nos comandos, os nomes curtos novos são `faturamento` e `execucao`.
+- Os serviços conversam por mensagens (SNS + SQS), nunca por HTTP entre si nem pelo banco um
+  do outro. Tipo de mensagem novo entra no catálogo (§5 do contrato da Fase 4), no produtor e
+  no filtro da fila do consumidor (`infra/locals.tf`), no mesmo conjunto de PRs.
 
 ## Fonte da verdade
 
@@ -233,6 +253,8 @@ IaC é `fmt` + `validate` sem backend.
 - **gateway:** composer, contrato do JWT, phpunit, phpstan, `fmt` e `validate`;
 - **aplicação:** composer, php-cs-fixer, phpstan, phpunit e `kustomize build` dos dois overlays,
   e o build da imagem de produção com `--image`;
+- **faturamento e execução:** composer, php-cs-fixer, phpstan, testes com cobertura mínima de
+  80%, `kustomize build`, `fmt` e `validate` do `infra/`, e a imagem com `--image`;
 - **workspace:** shellcheck, Python, os testes de `tests/` e `check-contracts`.
 
 O passo `workflows` (actionlint) confere a sintaxe dos workflows de todos os repos e bloqueia. Leva cerca de 30 s com tudo; `--changed` olha

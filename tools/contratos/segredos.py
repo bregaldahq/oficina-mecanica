@@ -5,7 +5,7 @@ Lambda (SDK) e o smoke test do deploy da fundação.
 """
 import re
 
-from . import CONTRATOS, Finding, Repos, find_line, line_of, md_section, tf_blocks
+from . import CONTRATOS, CONTRATOS_F4, Finding, Repos, find_line, line_of, md_section, tf_blocks
 
 SECRETS_TF = "secrets.tf"
 
@@ -72,8 +72,14 @@ def check(repos: Repos) -> list[Finding]:
         doc = repos.read("api", CONTRATOS)
         section = md_section(doc, 3)
         base = doc.find(section)
+        # Fase 4: a linha do segredo na tabela da seção 3 cita, em maiúsculas, as chaves que soma.
+        extra: dict[str, set[str]] = {}
+        if repos.exists("api", CONTRATOS_F4):
+            for row in re.finditer(r"^\| `oficina/<env>/(\w+)` \|(.*)$", md_section(repos.read("api", CONTRATOS_F4), 3), re.M):
+                extra[row.group(1)] = set(re.findall(r"`([A-Z][A-Z0-9_]+)`", row.group(2)))
         for m in re.finditer(r"\*\*`oficina/<env>/(\w+)`\*\*.*?```json(.*?)```", section, re.S):
-            secret, documented = m.group(1), set(re.findall(r'"(\w+)"\s*:', m.group(2)))
+            secret = m.group(1)
+            documented = set(re.findall(r'"(\w+)"\s*:', m.group(2))) | extra.get(secret, set())
             if secret in keys and documented != keys[secret]:
                 diff = sorted(documented ^ keys[secret])
                 out.append(Finding("SEG-2", "aviso", "§3", f"as chaves de oficina/<env>/{secret} no CONTRATOS.md e no secrets.tf "

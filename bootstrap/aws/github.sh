@@ -23,7 +23,7 @@ account="$(out .account_id.value)"
 bucket="$(out .state_bucket.value)"
 
 commands=()
-for repo in oficina-infra-fundacao oficina-infra-cluster oficina-gateway-auth oficina-api; do
+for repo in oficina-infra-fundacao oficina-infra-cluster oficina-gateway-auth oficina-api oficina-faturamento oficina-execucao; do
   role="$(out ".ci_role_arns.value[\"$repo\"]")"
   commands+=("gh secret set AWS_ROLE_ARN --repo $OWNER/$repo --body $role")
   commands+=("gh secret set AWS_ACCOUNT_ID --repo $OWNER/$repo --body $account")

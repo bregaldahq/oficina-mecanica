@@ -22,8 +22,18 @@ REPOS = {
     "cluster": ("oficina-infra-cluster", "oficina-infra-k8s"),
     "gateway": ("oficina-gateway-auth", "oficina-lambda-auth"),
     "api": ("oficina-api", "oficina-mecanica-tech-challenge"),
+    # Fase 4: nasceram com o nome atual, então não têm nome antigo.
+    "faturamento": ("oficina-faturamento", "oficina-faturamento"),
+    "execucao": ("oficina-execucao", "oficina-execucao"),
 }
 CONTRATOS = "docs/fase-3/CONTRATOS.md"
+# Fase 4: adendos ao contrato da Fase 3, no mesmo repo. Enquanto a fase está em implementação,
+# ele só amplia o que o documento reconhece (parâmetros, chaves de segredo); o que ele lista e
+# ainda não existe no código não vira achado.
+CONTRATOS_F4 = "docs/fase-4/CONTRATOS.md"
+# Chave curta dos microsserviços da Fase 4 nos nomes de parâmetros, filas e segredos
+# (<servico> no CONTRATOS da Fase 4). O serviço de OS (repo api) usa "os".
+SERVICE_KEYS = {"api": "os", "faturamento": "faturamento", "execucao": "execucao"}
 FAMILIES = ("ssm", "jwt", "rotas", "segredos", "k8s", "migrations", "nomes", "docs")
 
 
@@ -70,6 +80,9 @@ class Repos:
     def read(self, short: str, rel: str) -> str:
         p = self.paths[short] / rel
         return p.read_text(errors="ignore") if p.is_file() else ""
+
+    def exists(self, short: str, rel: str) -> bool:
+        return self.has(short) and (self.paths[short] / rel).is_file()
 
     def tracked(self, short: str) -> list[str]:
         out = subprocess.run(["git", "-C", str(self.paths[short]), "ls-files"], capture_output=True, text=True)

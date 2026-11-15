@@ -20,6 +20,7 @@ ARG ACTIONLINT_VERSION=1.7.1
 RUN apt-get update \
  && apt-get install -y --no-install-recommends git unzip curl ca-certificates jq shellcheck \
  && docker-php-ext-install pdo_mysql \
+ && pecl install pcov && docker-php-ext-enable pcov \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=composer:2.7 /usr/bin/composer /usr/local/bin/composer
