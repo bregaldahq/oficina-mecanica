@@ -82,12 +82,12 @@ hml.
 | # | Repositório | PR | Antes, confirme |
 |---|---|---|---|
 | 1 | fundação | [#15](https://github.com/bregaldahq/oficina-infra-fundacao/pull/15) migration 004 da saga | — |
-| 2 | faturamento | [#1](https://github.com/bregaldahq/oficina-faturamento/pull/1), depois [#2](https://github.com/bregaldahq/oficina-faturamento/pull/2) | passo 2 (Mercado Pago) feito logo após o deploy |
-| 3 | execucao | [#1](https://github.com/bregaldahq/oficina-execucao/pull/1), depois [#2](https://github.com/bregaldahq/oficina-execucao/pull/2) | — |
-| 4 | api | [#28](https://github.com/bregaldahq/oficina-api/pull/28), [#29](https://github.com/bregaldahq/oficina-api/pull/29), [#30](https://github.com/bregaldahq/oficina-api/pull/30), [#31](https://github.com/bregaldahq/oficina-api/pull/31) | Faturamento e Execução no ar em hml; `bootstrap/aws/` reaplicado |
+| 2 | faturamento | [#1](https://github.com/bregaldahq/oficina-faturamento/pull/1), [#2](https://github.com/bregaldahq/oficina-faturamento/pull/2), [#3](https://github.com/bregaldahq/oficina-faturamento/pull/3) | passo 2 (Mercado Pago) feito logo após o deploy |
+| 3 | execucao | [#1](https://github.com/bregaldahq/oficina-execucao/pull/1), [#2](https://github.com/bregaldahq/oficina-execucao/pull/2), [#3](https://github.com/bregaldahq/oficina-execucao/pull/3) | — |
+| 4 | api | [#28](https://github.com/bregaldahq/oficina-api/pull/28), [#29](https://github.com/bregaldahq/oficina-api/pull/29), [#30](https://github.com/bregaldahq/oficina-api/pull/30), [#31](https://github.com/bregaldahq/oficina-api/pull/31), [#32](https://github.com/bregaldahq/oficina-api/pull/32) | Faturamento e Execução no ar em hml; `bootstrap/aws/` reaplicado |
 | 5 | gateway | [#14](https://github.com/bregaldahq/oficina-gateway-auth/pull/14), depois [#15](https://github.com/bregaldahq/oficina-gateway-auth/pull/15) | o OS da Etapa 5 no ar (a `auth-cpf` nova chama a rota interna dele) |
 | 6 | fundação | [#16](https://github.com/bregaldahq/oficina-infra-fundacao/pull/16) migration 005 | o OS da Etapa 5 no ar em hml (o OS antigo lê as tabelas que ela apaga) |
-| 7 | workspace | [#6](https://github.com/bregaldahq/oficina-mecanica/pull/6), [#7](https://github.com/bregaldahq/oficina-mecanica/pull/7), [#8](https://github.com/bregaldahq/oficina-mecanica/pull/8), [#9](https://github.com/bregaldahq/oficina-mecanica/pull/9) e o desta entrega | depois do gateway (o e2e usa a `auth-cpf` nova) |
+| 7 | workspace | [#6](https://github.com/bregaldahq/oficina-mecanica/pull/6), [#7](https://github.com/bregaldahq/oficina-mecanica/pull/7), [#8](https://github.com/bregaldahq/oficina-mecanica/pull/8), [#9](https://github.com/bregaldahq/oficina-mecanica/pull/9), [#10](https://github.com/bregaldahq/oficina-mecanica/pull/10) | depois do gateway (o e2e usa a `auth-cpf` nova) |
 
 Ainda abertos da Fase 3, para você decidir: api [#20](https://github.com/bregaldahq/oficina-api/pull/20),
 fundação [#6](https://github.com/bregaldahq/oficina-infra-fundacao/pull/6) e
