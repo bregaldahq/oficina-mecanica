@@ -17,3 +17,6 @@ __pycache__/
 bootstrap/aws/.terraform/
 bootstrap/aws/terraform.tfstate*
 bootstrap/aws/*.tfvars
+
+# Gerado por docs/entrega/gerar.py; a fonte é o .md e a entrega é o .pdf
+docs/entrega/*.html
