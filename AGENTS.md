@@ -260,7 +260,7 @@ IaC é `fmt` + `validate` sem backend.
   de 80%, Behat, `kustomize build`, `fmt` e `validate` do `infra/`, e a imagem com `--image`;
 - **workspace:** shellcheck, Python, os testes de `tests/` e `check-contracts`.
 
-O passo `workflows` (actionlint) confere a sintaxe dos workflows de todos os repos e bloqueia. Leva cerca de 30 s com tudo; `--changed` olha
+O passo `workflows` (actionlint) confere a sintaxe dos workflows de todos os repos e bloqueia; ele também acusa pipe para `tee`, `head`, `sed`... sem `pipefail`, que esconderia a falha do passo. Leva cerca de 30 s com tudo; `--changed` olha
 só os repos com mudança, e `--fast` pula as migrations. O resultado vai para
 `.ws/verify/latest.json` e os logs para `.ws/verify/logs/`.
 
