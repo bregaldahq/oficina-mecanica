@@ -413,6 +413,52 @@ class ContratosTest(unittest.TestCase):
         self.assertFinds({"workspace": {"AGENTS.md": "Veja `bin/nao-existe.sh`.\n"}}, "DOC-1", "aviso")
 
     # conhecidos.txt
+    # Fase 4
+    F4_PUBLICA = ('resource "aws_ssm_parameter" "svc" {\n  for_each = local.service_listeners\n'
+                  '  name = "/oficina/${var.environment}/nlb/${each.key}/listener_arn"\n}\n')
+    F4_LE = 'data "aws_ssm_parameter" "fat" {\n  name = "/oficina/${var.environment}/nlb/faturamento/listener_arn"\n}\n'
+
+    def ids(self, changes: dict) -> list[tuple[str, str]]:
+        with Cenario(changes) as c:
+            return [(f.id, f.chave) for f in c.run()]
+
+    def test_parametro_por_servico_publicado_com_for_each(self):
+        ok = self.ids({"cluster": {"fase4.tf": self.F4_PUBLICA}, "gateway": {"fase4.tf": self.F4_LE}})
+        self.assertNotIn(("SSM-1", "nlb/faturamento/listener_arn"), ok)
+        sem_dono = self.ids({"gateway": {"fase4.tf": self.F4_LE}})
+        self.assertIn(("SSM-1", "nlb/faturamento/listener_arn"), sem_dono)
+
+    def test_parametro_do_contrato_da_fase_4_nao_e_fora_do_documento(self):
+        publica = {"fundacao": {"messaging.tf": 'resource "aws_ssm_parameter" "t" {\n'
+                                                '  name = "/oficina/${var.environment}/messaging/topic_arn"\n}\n'}}
+        self.assertIn(("SSM-4", "messaging/topic_arn"), self.ids(publica))
+        doc = "## 2. SSM\n\n| Parâmetro | Conteúdo |\n|---|---|\n| `/oficina/<env>/messaging/topic_arn` | ARN |\n"
+        com_doc = self.ids({**publica, "api": {contratos.CONTRATOS_F4: doc}})
+        self.assertNotIn(("SSM-4", "messaging/topic_arn"), com_doc)
+
+    def test_parametro_do_proprio_servico_nao_precisa_de_outro_leitor(self):
+        with Cenario() as c:
+            c.repos.paths["execucao"] = Path(c.tmp.name) / "oficina-execucao"
+            infra = c.repos.paths["execucao"] / "infra"
+            infra.mkdir(parents=True)
+            (infra / "ssm.tf").write_text('resource "aws_ssm_parameter" "q" {\n'
+                                          '  name = "/oficina/${var.environment}/${local.service}/queue_url"\n}\n')
+            subprocess.run(["git", "init", "-q", str(infra.parent)], check=True)
+            subprocess.run(["git", "-C", str(infra.parent), "add", "-A"], check=True)
+            achados = [(f.id, f.chave) for f in c.run()]
+        self.assertNotIn(("SSM-3", "execucao/queue_url"), achados)
+        self.assertNotIn(("SSM-1", "execucao/queue_url"), achados)
+
+    def test_role_de_ci_de_repo_da_fase_4_nao_tem_nome_antigo(self):
+        achados = self.ids({"cluster": {"envs/fase4.tfvars": 'x = "arn:aws:iam::1:role/oficina-gha-oficina-faturamento"\n'}})
+        self.assertEqual([a for a in achados if a[0] == "NOME-1"], [])
+
+    def test_nome_do_proprio_servico_por_interpolacao(self):
+        self.assertEqual(contratos.ssm.normalize("execucao", "/oficina/${var.environment}/${local.service}/queue_url"),
+                         "/oficina/${var.environment}/execucao/queue_url")
+        self.assertEqual(contratos.ssm.normalize("cluster", "/oficina/hml/nlb/${each.key}/listener_arn"),
+                         "/oficina/hml/nlb/<servico>/listener_arn")
+
     def test_erro_conhecido_nao_derruba(self):
         changes = {"cluster": {"ssm.tf": None}}
         with Cenario(changes) as c:

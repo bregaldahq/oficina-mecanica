@@ -13,6 +13,11 @@ locals {
     cluster  = { repo = "oficina-infra-cluster", role = "oficina-gha-oficina-infra-k8s", terraform = true }
     gateway  = { repo = "oficina-gateway-auth", role = "oficina-gha-oficina-lambda-auth", terraform = true }
     api      = { repo = "oficina-api", role = "oficina-gha-oficina-mecanica-tech-challenge", terraform = false }
+    # Fase 4: nasceram com o nome atual. Cada um aplica o próprio infra/ (fila, IRSA, ECR,
+    # banco) e faz o deploy no cluster; o acesso ao Kubernetes vem de service_ci_role_arns, nos
+    # envs/*.tfvars do oficina-infra-cluster.
+    faturamento = { repo = "oficina-faturamento", role = "oficina-gha-oficina-faturamento", terraform = true }
+    execucao    = { repo = "oficina-execucao", role = "oficina-gha-oficina-execucao", terraform = true }
   }
 
   github_subjects = ["pull_request", "environment:homologacao", "environment:producao",

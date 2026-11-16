@@ -28,6 +28,16 @@ def decide(path: str, project: str) -> str | None:
     return None
 
 
+def session_root(project: str, cwd: str) -> str:
+    """A raiz desta sessão. No app desktop, CLAUDE_PROJECT_DIR aponta para o checkout principal
+    mesmo quando a sessão roda num worktree: aí quem diz qual é o worktree da sessão é o cwd."""
+    project, cwd = os.path.normpath(project), os.path.normpath(cwd)
+    m = re.search(r"^(.*/\.claude/worktrees/[^/]+)(/|$)", cwd)
+    if m and (m.group(1) + "/").startswith(project + "/"):
+        return m.group(1)
+    return project
+
+
 def main() -> int:
     event = json.load(sys.stdin)
     tool_input = event.get("tool_input") or {}
@@ -36,8 +46,7 @@ def main() -> int:
         return 0
     cwd = event.get("cwd") or os.getcwd()
     path = os.path.normpath(os.path.join(cwd, os.path.expanduser(path)))
-    project = os.environ.get("CLAUDE_PROJECT_DIR") or cwd
-    reason = decide(path, os.path.normpath(project))
+    reason = decide(path, session_root(os.environ.get("CLAUDE_PROJECT_DIR") or cwd, cwd))
     if reason:
         print(json.dumps({"hookSpecificOutput": {
             "hookEventName": "PreToolUse",

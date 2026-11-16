@@ -132,8 +132,9 @@ def migrations_twice(repo: Path, log: TextIO) -> bool:
 
 def app_image(repo: Path, log: TextIO) -> bool:
     # O PR só valida que a imagem constrói e que o agente do New Relic carrega (exige glibc).
-    return (sh(["docker", "build", "--target", "production", "-t", "oficina-api:verify", str(repo)], log)
-            and sh(["sh", "-c", "docker run --rm oficina-api:verify php -m | grep -qi newrelic"], log))
+    tag = f"{repo.name}:verify"
+    return (sh(["docker", "build", "--target", "production", "-t", tag, str(repo)], log)
+            and sh(["sh", "-c", f"docker run --rm --entrypoint php {tag} -m | grep -qi newrelic"], log))
 
 
 def python_compiles(repo: Path, log: TextIO) -> bool:
@@ -150,7 +151,31 @@ def contracts(repo: Path, log: TextIO) -> bool:
     return sh([sys.executable, str(repo / "bin" / "check-contracts.py")], log)
 
 
+# Fase 4: os microsserviços novos têm a mesma forma (código PHP, deploy/ e infra/ no mesmo repo)
+# e o mesmo pr.yml, com cobertura mínima de 80% das linhas de src/.
+SERVICE_STEPS = [
+    Step("composer", COMPOSER, "pr.yml: composer install"),
+    Step("cs-fixer", tool("PHP_CS_FIXER_IGNORE_ENV=1 vendor/bin/php-cs-fixer fix --dry-run --diff --using-cache=no"),
+         "pr.yml: estilo (PSR-12)"),
+    Step("phpstan", tool("vendor/bin/phpstan analyse --no-progress --memory-limit=512M"), "pr.yml: PHPStan"),
+    Step("cobertura", tool("vendor/bin/phpunit --coverage-clover /tmp/coverage.xml"
+                           " && php bin/check-coverage.php /tmp/coverage.xml 80"),
+         "pr.yml: testes com cobertura mínima de 80%"),
+    # Só o serviço que já tem features roda o Behat; o esqueleto ainda não tem.
+    Step("bdd", tool("if [ -f behat.yml ]; then vendor/bin/behat --no-colors; else echo 'sem behat.yml'; fi"),
+         "pr.yml: BDD (Behat)"),
+    Step("kustomize", tool("kustomize build deploy/overlays/hml >/dev/null"
+                           " && kustomize build deploy/overlays/prod >/dev/null"), "pr.yml: manifests"),
+    Step("tf-fmt", tool("cd infra && terraform fmt -check -recursive -diff"), "pr.yml: terraform fmt (infra/)"),
+    Step("tf-validate", tool("cd infra && terraform init -backend=false -input=false -no-color >/dev/null"
+                             " && terraform validate -no-color"), "pr.yml: terraform validate (infra/)"),
+    Step("image", app_image, "pr.yml: build da imagem e extensão New Relic", image=True),
+    Step("workflows", ACTIONLINT, "fora do CI: workflow inválido nem carrega no GitHub"),
+]
+
 STEPS: dict[str, list[Step]] = {
+    "oficina-faturamento": SERVICE_STEPS,
+    "oficina-execucao": SERVICE_STEPS,
     "oficina-infra-fundacao": [
         Step("tf-fmt", TF_FMT, "pr.yml: terraform fmt"),
         Step("tf-validate", TF_VALIDATE, "pr.yml: terraform validate (aqui sem backend)"),
@@ -278,9 +303,13 @@ def main() -> int:
     selected = [n for n in selected if n not in missing]
     if args.changed:
         selected = [n for n in selected if changed(paths[n])]
+        # Um repo que ainda não foi clonado não tem mudança: avisa, mas não reprova.
+        absent, missing = missing, []
+    else:
+        absent = missing
 
     out = Printer(sys.stderr if args.json else sys.stdout)
-    for n in missing:
+    for n in absent:
         out.line(f"{n}: ausente em {base} (rode bin/ws clone)")
     if not selected:
         out.line("nada para verificar" + (" (nenhum repo com mudanças)" if args.changed else ""))

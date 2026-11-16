@@ -4,4 +4,6 @@
 oficina-infra-fundacao   fundacao: VPC, RDS, segredos, migrations
 oficina-infra-cluster    cluster: EKS, add-ons, ECR, NLB interno
 oficina-gateway-auth     borda: Lambdas auth-cpf e jwt-authorizer, API Gateway
-oficina-api              aplicacao: API PHP, deploy kustomize, contratos e ADRs
+oficina-api              os: servico de OS (API PHP), orquestrador da saga, contratos e ADRs
+oficina-faturamento      faturamento: orcamento, estoque e pagamento (Fase 4)
+oficina-execucao         execucao: fila da oficina, diagnostico e reparo (Fase 4)

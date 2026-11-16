@@ -167,6 +167,27 @@ class GuardEditTest(unittest.TestCase):
                 self.assertIsNone(guard_edit.decide(path, self.PROJECT))
 
 
+    def test_sessao_em_worktree_com_projeto_no_checkout_principal(self):
+        # O app desktop roda o hook com CLAUDE_PROJECT_DIR no checkout principal e o cwd no
+        # worktree da sessão: o worktree da própria sessão não pode ser negado.
+        root = guard_edit.session_root("/root/ws", "/root/ws/.claude/worktrees/sessao-a/docs")
+        self.assertEqual(root, "/root/ws/.claude/worktrees/sessao-a")
+        self.assertIsNone(guard_edit.decide("/root/ws/.claude/worktrees/sessao-a/docs/x.md", root))
+        self.assertIsNotNone(guard_edit.decide("/root/ws/.claude/worktrees/sessao-b/docs/x.md", root))
+        # Sem worktree no cwd, ou com o cwd fora do projeto, vale o projeto.
+        self.assertEqual(guard_edit.session_root("/root/ws", "/root/ws/docs"), "/root/ws")
+        self.assertEqual(guard_edit.session_root("/root/ws", "/outro/.claude/worktrees/x"), "/root/ws")
+
+    def test_hook_libera_o_worktree_da_propria_sessao(self):
+        wt = "/root/ws/.claude/worktrees/sessao-a"
+        env = {**os.environ, "CLAUDE_PROJECT_DIR": "/root/ws"}
+        for path, negado in [(f"{wt}/docs/x.md", False), ("/root/ws/.claude/worktrees/sessao-b/x.md", True)]:
+            with self.subTest(path=path):
+                event = {"tool_input": {"file_path": path}, "cwd": wt}
+                out = subprocess.run([str(HOOKS / "guard-edit.py")], input=json.dumps(event), capture_output=True, text=True, env=env)
+                self.assertEqual("deny" in out.stdout, negado)
+
+
 class AfterEditTest(unittest.TestCase):
     def run_hook(self, project: Path, path: str, session: str) -> str:
         event = {"tool_input": {"file_path": path}, "cwd": str(project), "session_id": session}

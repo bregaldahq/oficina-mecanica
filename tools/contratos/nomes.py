@@ -42,7 +42,8 @@ def check(repos: Repos) -> list[Finding]:
                 continue
             text = repos.read(short, rel)
             for m in re.finditer(r"oficina-gha-([\w-]+)", text):
-                if m.group(1) in new_names:
+                # Repo da Fase 4 nasceu com o nome atual: nome novo e antigo são o mesmo.
+                if m.group(1) in new_names and REPOS[new_names[m.group(1)]][1] != m.group(1):
                     out.append(Finding("NOME-1", "erro", "README", f"role 'oficina-gha-{m.group(1)}' não existe: os roles de CI "
                                        f"continuam com o nome antigo ('oficina-gha-{REPOS[new_names[m.group(1)]][1]}')",
                                        f"{new}:{rel} role", [repos.at(short, rel, line_of(text, m.start()))]))
