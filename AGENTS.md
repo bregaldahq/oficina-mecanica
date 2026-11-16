@@ -18,7 +18,6 @@ PRs antigos, a chave do state do Terraform, os roles de CI (`oficina-gha-<nome-a
 | `repos/oficina-infra-cluster` | **Cluster**: EKS, node group, add-ons Helm, ECR, NLB interno + target group, `ClusterSecretStore` | Terraform | ocasional |
 | `repos/oficina-gateway-auth` | **Borda**: Lambdas `auth-cpf` e `jwt-authorizer` (PHP/Bref), API Gateway, VPC Link | PHP 8.2 + Terraform | ocasional |
 | `repos/oficina-api` | **Aplicação**: API REST em PHP puro (DDD, Clean Architecture), `deploy/` em kustomize, Job de migration | PHP 8.2 | diário |
-
 | `repos/oficina-faturamento` | **Faturamento** (Fase 4, esqueleto): orçamento, estoque, pagamento; `deploy/` e `infra/` próprios | PHP 8.2 + Terraform | diário |
 | `repos/oficina-execucao` | **Execução** (Fase 4, esqueleto): fila da oficina, diagnóstico, reparo; `deploy/` e `infra/` próprios | PHP 8.2 + Terraform | diário |
 
@@ -269,6 +268,11 @@ a aplicação e usa as Lambdas do gateway como classes para conferir o caminho i
 da `auth-cpf` aceito pela aplicação, o `jwt-authorizer`, a matriz de autorização e o webhook.
 Leva cerca de 30 s e usa a branch em disco de cada repo. Ele pega quebras entre repos que os
 testes de cada repo não pegam.
+
+Com o `oficina-execucao` em disco, o `e2e` roda também a parte da Fase 4 (`bin/e2e_fase4.py`,
+mais cerca de 1 min): sobe um LocalStack (SNS, SQS, DynamoDB), faz o papel do orquestrador
+publicando comandos no tópico, age como o mecânico pela API e confere, numa fila de sonda, o
+que o serviço publicou. `--fase3` e `--fase4` rodam só uma das partes.
 
 Para um comando avulso, use `bin/ws exec <repo> <cmd>`, por exemplo
 `bin/ws exec gateway vendor/bin/phpunit --filter Jwt`. Nos repos, o `make install/test/stan` do

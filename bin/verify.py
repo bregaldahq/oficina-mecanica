@@ -161,6 +161,9 @@ SERVICE_STEPS = [
     Step("cobertura", tool("vendor/bin/phpunit --coverage-clover /tmp/coverage.xml"
                            " && php bin/check-coverage.php /tmp/coverage.xml 80"),
          "pr.yml: testes com cobertura mínima de 80%"),
+    # Só o serviço que já tem features roda o Behat; o esqueleto ainda não tem.
+    Step("bdd", tool("if [ -f behat.yml ]; then vendor/bin/behat --no-colors; else echo 'sem behat.yml'; fi"),
+         "pr.yml: BDD (Behat)"),
     Step("kustomize", tool("kustomize build deploy/overlays/hml >/dev/null"
                            " && kustomize build deploy/overlays/prod >/dev/null"), "pr.yml: manifests"),
     Step("tf-fmt", tool("cd infra && terraform fmt -check -recursive -diff"), "pr.yml: terraform fmt (infra/)"),

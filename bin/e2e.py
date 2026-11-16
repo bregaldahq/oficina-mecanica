@@ -11,9 +11,15 @@ duas vezes) e sobe a aplicação (php -S). Depois usa as Lambdas do gateway como
 - a matriz de autorização;
 - o webhook.
 
+Depois, se o repo oficina-execucao estiver em disco com o worker, roda a parte da Fase 4
+(bin/e2e_fase4.py): o serviço de Execução contra um LocalStack (SNS, SQS, DynamoDB).
+
 Usa a branch que estiver em disco em cada repo.
 
-Uso: bin/ws e2e [--keep]     --keep deixa os containers de pé para investigar
+Uso: bin/ws e2e [--keep] [--fase3] [--fase4]
+  --keep    deixa os containers de pé para investigar
+  --fase3   só a parte da Fase 3
+  --fase4   só a parte da Fase 4
 """
 import json
 import os
@@ -22,6 +28,7 @@ import subprocess
 import sys
 import time
 
+from e2e_fase4 import Fase4E2E
 from wslib import ROOT, repos_dir
 
 TOOLING = ROOT / "bin" / "tooling"
@@ -172,15 +179,22 @@ def main() -> int:
     if subprocess.run(["docker", "info"], capture_output=True).returncode != 0:
         print("o Docker não está rodando")
         return 1
+    keep = "--keep" in sys.argv
     e2e = E2E()
+    fase4 = Fase4E2E(e2e.check)
     try:
-        return e2e.run()
+        if "--fase4" not in sys.argv and e2e.run():
+            return 1
+        if "--fase3" not in sys.argv and fase4.available():
+            fase4.run()
+        return e2e.finish() if fase4.available() and "--fase3" not in sys.argv else (1 if e2e.failed else 0)
     finally:
-        if "--keep" in sys.argv:
-            print(f"containers de pé: {e2e.db}, {e2e.app} (rede {e2e.net}); para tirar: "
-                  f"docker rm -f {e2e.app} {e2e.db} && docker network rm {e2e.net}")
+        if keep:
+            print(f"containers de pé: {e2e.db}, {e2e.app} (rede {e2e.net}) e {fase4.app}, {fase4.ls} (rede {fase4.net}); "
+                  "tire com docker rm -f e docker network rm")
         else:
             e2e.down()
+            fase4.down()
 
 
 if __name__ == "__main__":
