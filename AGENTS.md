@@ -208,6 +208,10 @@ principal, e `bin/ws` e `bin/check-contracts.py` fazem a mesma resolução sozin
 os mesmos do checkout principal: duas sessões abertas ao mesmo tempo mexem nos mesmos arquivos.
 Para isolar, use `bin/ws isolate <branch> <repo...>`.
 
+Não mude o diretório da sessão para o checkout principal: o `guard-edit` descobre qual worktree é
+da sessão pelo diretório atual, e passa a negar edição no próprio worktree. Para mexer no
+checkout principal, use `git -C /caminho/do/checkout ...`.
+
 ### Guardrails executados
 
 As regras para agentes, mais abaixo, não dependem só de você lembrar delas.

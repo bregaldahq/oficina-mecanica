@@ -23,6 +23,7 @@ class Fase4E2ETest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             e2e = self.make(Path(tmp))
             self.assertFalse(e2e.available())
+            self.assertFalse(e2e.billing_available())
             (Path(tmp) / "oficina-execucao" / "bin").mkdir(parents=True)
             (Path(tmp) / "oficina-execucao" / "bin" / "worker.php").write_text("<?php")
             self.assertTrue(e2e.available())
@@ -41,9 +42,27 @@ class Fase4E2ETest(unittest.TestCase):
         tipos = re.findall(r"^\| `([a-z-]+\.[a-z-]+)` \| execucao → os \|", contrato.read_text(), re.M)
         self.assertEqual(sorted(tipos), sorted(e2e_fase4.EXECUTION_EVENTS))
 
+    def test_a_sonda_escuta_exatamente_os_eventos_do_faturamento_no_contrato(self):
+        contrato = ROOT / "repos" / "oficina-api" / "docs" / "fase-4" / "CONTRATOS.md"
+        if not contrato.is_file():
+            self.skipTest("contrato da Fase 4 não está em disco")
+        import re
+        tipos = re.findall(r"^\| `([a-z-]+\.[a-z-]+)` \| faturamento → os \|", contrato.read_text(), re.M)
+        self.assertEqual(sorted(tipos), sorted(e2e_fase4.BILLING_EVENTS))
+
+    def test_assinatura_do_webhook_igual_a_do_servico(self):
+        # O mesmo manifesto de oficina-faturamento/src/Infrastructure/Payment/WebhookSignature.php
+        import hashlib
+        import hmac
+        e2e = self.make(Path("/nao-existe"))
+        e2e.billing_env["MP_WEBHOOK_SECRET"] = "s"
+        esperado = hmac.new(b"s", b"id:abc;request-id:r;ts:1;", hashlib.sha256).hexdigest()
+        self.assertEqual(e2e.sign("ABC", "r", "1"), f"ts=1,v1={esperado}")
+
     def test_o_ambiente_local_nao_tem_credencial_de_verdade(self):
         e2e = self.make(Path("/nao-existe"))
         self.assertNotIn("AWS_ACCESS_KEY_ID", e2e.env)
+        self.assertEqual(e2e.billing_env["PAYMENT_GATEWAY"], "fake", "o e2e nunca chama o Mercado Pago de verdade")
         self.assertTrue(e2e.env["AWS_ENDPOINT_URL"].startswith("http://oficina-e2e4-"))
 
 
