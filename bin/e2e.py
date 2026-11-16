@@ -44,6 +44,7 @@ class E2E:
             "DB_HOST": self.db, "DB_PORT": "3306", "DB_DATABASE": "oficina_mecanica", "DB_USERNAME": "root",
             "DB_PASSWORD": "root", "JWT_SECRET": secrets.token_hex(32), "JWT_EXPIRATION": "3600",
             "ADMIN_USERNAME": "admin", "ADMIN_PASSWORD": secrets.token_hex(12), "WEBHOOK_TOKEN": secrets.token_hex(16),
+            "INTERNAL_TOKEN": secrets.token_hex(16),
             "APP_ENV": "hml",  # o seed _demo só roda fora de produção
             "MIGRATIONS_PATH": "/migrations",  # as da fundação, como no Job oficina-migrate
         }
@@ -156,11 +157,16 @@ class E2E:
         self.check("a aplicação aceita o token emitido pela Lambda: GET /api/service-orders/me 200", status == 200, f"{status} {body}")
         self.check("token de cliente em rota de admin: 403", self.http("GET", "/api/customers", token)[0] == 403)
 
+        # Fase 4: a consulta interna que tira a auth-cpf do banco do OS (docs/fase-4/CONTRATOS.md §7).
+        path = f"/internal/customers/by-document/{cpf}"
+        self.check("consulta interna de cliente sem X-Internal-Token: 401", self.http("GET", path)[0] == 401)
+        status, body = self.http("GET", path, headers={"X-Internal-Token": self.env["INTERNAL_TOKEN"]})
+        self.check("consulta interna de cliente com X-Internal-Token: 200 e o mesmo id da auth-cpf",
+                   status == 200 and json.loads(body or "{}").get("id") == customer_id, f"{status} {body}"[:200])
         order = self.sql("SELECT id FROM service_orders WHERE status = 'AWAITING_APPROVAL' LIMIT 1")
         if order:
-            status = self.http("POST", f"/api/service-orders/{order}/approval", body={"approved": True},
-                               headers={"X-Webhook-Token": "errado"})[0]
-            self.check("webhook de aprovação com X-Webhook-Token errado: 401/403", status in (401, 403), str(status))
+            self.check("rota de aprovação saiu do OS (foi para o Faturamento): 404",
+                       self.http("POST", f"/api/service-orders/{order}/approval", admin, body={"approved": True})[0] == 404)
         return self.finish()
 
     def finish(self) -> int:

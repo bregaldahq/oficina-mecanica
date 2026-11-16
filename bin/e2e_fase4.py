@@ -38,20 +38,31 @@ class Fase4E2E:
         self.check = check
         self.repo = repos_dir() / "oficina-execucao"
         self.billing = repos_dir() / "oficina-faturamento"
+        self.os_repo = repos_dir() / "oficina-api"
+        self.fundacao = repos_dir() / "oficina-infra-fundacao"
         self.net = f"oficina-e2e4-{os.getpid()}"
         self.ls, self.app = f"{self.net}-aws", f"{self.net}-execucao"
         self.db, self.billing_app = f"{self.net}-db", f"{self.net}-faturamento"
+        self.os_db, self.os_app = f"{self.net}-os-db", f"{self.net}-os"
         self.env = {"JWT_SECRET": secrets.token_hex(32), "JWT_EXPIRATION": "3600", "APP_ENV": "hml",
                     "AWS_REGION": "us-east-1", "AWS_ENDPOINT_URL": f"http://{self.ls}:4566",
                     "WORKER_MAX_TICKS": "1", "WORKER_WAIT_SECONDS": "2"}
         self.billing_env = {"DB_HOST": self.db, "DB_PORT": "3306", "DB_DATABASE": "oficina_faturamento",
                             "DB_USERNAME": "root", "DB_PASSWORD": "root", "WEBHOOK_TOKEN": secrets.token_hex(16),
                             "MP_WEBHOOK_SECRET": secrets.token_hex(16), "PAYMENT_GATEWAY": "fake"}
+        self.os_env = {"DB_HOST": self.os_db, "DB_PORT": "3306", "DB_DATABASE": "oficina_mecanica", "DB_USERNAME": "root",
+                       "DB_PASSWORD": "root", "ADMIN_USERNAME": "admin", "ADMIN_PASSWORD": secrets.token_hex(12),
+                       "INTERNAL_TOKEN": secrets.token_hex(16), "MIGRATIONS_PATH": "/migrations",
+                       "SAGA_APPROVAL_TIMEOUT_SECONDS": "600", "SAGA_PAYMENT_TIMEOUT_SECONDS": "600"}
         self.sequence = 0
         self.probe = ""
 
     def available(self) -> bool:
         return (self.repo / "bin" / "worker.php").is_file()
+
+    def saga_available(self) -> bool:
+        return self.billing_available() and (self.os_repo / "bin" / "worker.php").is_file() \
+            and (self.fundacao / "migrations" / "004_fase4_saga.sql").is_file()
 
     def billing_available(self) -> bool:
         return (self.billing / "bin" / "worker.php").is_file() and (self.billing / "migrations").is_dir()
@@ -60,22 +71,29 @@ class Fase4E2E:
     def aws(self, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess:
         return subprocess.run(["docker", "exec", "-i", self.ls, *args], input=stdin, capture_output=True, text=True)
 
-    def php(self, *args: str, detach: bool = False, billing: bool = False) -> subprocess.CompletedProcess:
-        repo, name = (self.billing, self.billing_app) if billing else (self.repo, self.app)
+    def php(self, *args: str, detach: bool = False, billing: bool = False, service: str = "") -> subprocess.CompletedProcess:
+        service = service or ("faturamento" if billing else "execucao")
+        repo, name = {"execucao": (self.repo, self.app), "faturamento": (self.billing, self.billing_app),
+                      "os": (self.os_repo, self.os_app)}[service]
         image = subprocess.run([str(TOOLING), "image"], capture_output=True, text=True, check=True).stdout.strip()
         cmd = ["docker", "run", "--rm", "--network", self.net, "-u", f"{os.getuid()}:{os.getgid()}", "-e", "HOME=/tmp",
                "-v", f"{repo.resolve()}:/w", "-w", "/w"]
         if (repo / ".env").exists():  # o serviço carrega o .env e ele sobrescreveria este ambiente
             cmd += ["-v", "/dev/null:/w/.env:ro"]
-        for key, value in {**self.env, **(self.billing_env if billing else {})}.items():
+        extra = {"faturamento": self.billing_env, "os": self.os_env}.get(service, {})
+        if service == "os":
+            cmd += ["-v", f"{(self.fundacao / 'migrations').resolve()}:/migrations:ro"]
+        for key, value in {**self.env, **extra}.items():
             cmd += ["-e", f"{key}={value}"]
         if detach:
             cmd[2:2] = ["-d", "--name", name]
         return subprocess.run(cmd + [image, *args], capture_output=True, text=True)
 
     def http(self, method: str, path: str, token: str = "", body: dict | None = None, billing: bool = False,
-             headers: dict | None = None):
-        app, prefix = (self.billing_app, "/api/billing") if billing else (self.app, "/api/execution")
+             headers: dict | None = None, service: str = ""):
+        service = service or ("faturamento" if billing else "execucao")
+        app, prefix = {"execucao": (self.app, "/api/execution"), "faturamento": (self.billing_app, "/api/billing"),
+                       "os": (self.os_app, "")}[service]
         cmd = ["docker", "exec", app, "curl", "-s", "-X", method, "-w", "\n%{http_code}", f"http://127.0.0.1:8080{prefix}{path}"]
         if token:
             cmd += ["-H", f"Authorization: Bearer {token}"]
@@ -119,6 +137,14 @@ class Fase4E2E:
                               init.stderr.strip()[-300:]):
                 return False
             self.billing_env["MESSAGING_QUEUE_URL"] = created["MESSAGING_QUEUE_URL"]
+        if self.saga_available():
+            init = self.aws("env", "ENVIRONMENT=e2e", "sh", stdin=(self.os_repo / "scripts" / "localstack-init.sh").read_text())
+            created = dict(line.split("=", 1) for line in init.stdout.splitlines() if "=" in line)
+            if not self.check("os: localstack-init.sh cria a fila da saga e assina o mesmo tópico",
+                              init.returncode == 0 and created.get("MESSAGING_TOPIC_ARN") == self.env["MESSAGING_TOPIC_ARN"],
+                              init.stderr.strip()[-300:]):
+                return False
+            self.os_env["MESSAGING_QUEUE_URL"] = created["MESSAGING_QUEUE_URL"]
 
         # A fila de sonda faz o papel da fila do serviço de OS: recebe o que a Execução publica.
         probe = self.aws("sh", "-ec", """
@@ -140,7 +166,7 @@ class Fase4E2E:
         return self.check("API da Execução de pé", False, "GET /api/execution/health não respondeu")
 
     def down(self) -> None:
-        subprocess.run(["docker", "rm", "-f", self.app, self.ls, self.db, self.billing_app], capture_output=True)
+        subprocess.run(["docker", "rm", "-f", self.app, self.ls, self.db, self.billing_app, self.os_db, self.os_app], capture_output=True)
         subprocess.run(["docker", "network", "rm", self.net], capture_output=True)
 
     # ── papéis ──────────────────────────────────────────────────────────────────────────────
@@ -162,9 +188,9 @@ class Fase4E2E:
             self.check(f"publicar {type_}", False, out.stderr[-200:])
         return message_id
 
-    def worker(self, billing: bool = False) -> list[dict]:
+    def worker(self, billing: bool = False, service: str = "") -> list[dict]:
         """Uma volta do worker (outbox + fila). Devolve as linhas de log estruturado."""
-        out = self.php("php", "bin/worker.php", billing=billing)
+        out = self.php("php", "bin/worker.php", billing=billing, service=service)
         lines = []
         for line in out.stdout.splitlines():
             try:
@@ -260,6 +286,8 @@ class Fase4E2E:
 
         if self.billing_available():
             self.run_billing()
+        if self.saga_available():
+            self.run_saga()
 
     # ── Faturamento ─────────────────────────────────────────────────────────────────────────
     def sign(self, data_id: str, request_id: str, ts: str) -> str:
@@ -377,3 +405,157 @@ class Fase4E2E:
         self.check("estoque insuficiente: budget.failed com INSUFFICIENT_STOCK e nada reservado",
                    [(e["type"], e["payload"].get("reason")) for e in events] == [("budget.failed", "INSUFFICIENT_STOCK")]
                    and self.part_stock(admin) == (SEED_PART[2], 0), str(events)[:300])
+
+    # ── A saga inteira, pelos três serviços ─────────────────────────────────────────────────
+    @staticmethod
+    def cpf() -> str:
+        base = [int(d) for d in f"{secrets.randbelow(10 ** 9):09d}"]
+        for _ in range(2):
+            total = sum(d * w for d, w in zip(base, range(len(base) + 1, 1, -1)))
+            base.append(0 if total % 11 < 2 else 11 - total % 11)
+        return "".join(map(str, base))
+
+    def os_up(self) -> bool:
+        if not (self.os_repo / "vendor" / "autoload.php").is_file():
+            subprocess.run([str(TOOLING), "run", str(self.os_repo), "composer", "install", "--no-interaction", "--quiet"], check=True)
+        subprocess.run(["docker", "run", "-d", "--rm", "--name", self.os_db, "--network", self.net, "-e", "MYSQL_ROOT_PASSWORD=root",
+                        "-e", "MYSQL_DATABASE=oficina_mecanica", "mysql:8.0"], capture_output=True, check=True)
+        for _ in range(90):
+            if subprocess.run(["docker", "exec", self.os_db, "mysql", "-h127.0.0.1", "-uroot", "-proot", "-e", "SELECT 1"],
+                              capture_output=True).returncode == 0:
+                break
+            time.sleep(2)
+        else:
+            return self.check("os: MySQL de pé", False, "não respondeu em 180 s")
+        out = self.php("php", "bin/migrate.php", service="os")
+        if not self.check("os: migrations da fundação, com a 004 da saga", out.returncode == 0, (out.stdout + out.stderr)[-300:]):
+            return False
+        self.php("php", "-S", "0.0.0.0:8080", "-t", "public", "public/index.php", detach=True, service="os")
+        for _ in range(30):
+            if self.http("GET", "/api/health", service="os")[0] == 200:
+                return True
+            time.sleep(1)
+        return self.check("os: API de pé", False, "GET /api/health não respondeu")
+
+    def round(self) -> None:
+        """Uma volta de cada worker: os comandos e eventos andam um passo pelos três serviços."""
+        for service in ("os", "execucao", "faturamento", "os"):
+            self.worker(service=service)
+
+    def order(self, admin: str, os_id: str) -> dict:
+        body = self.http("GET", f"/api/service-orders/{os_id}", admin, service="os")[1]
+        return body if isinstance(body, dict) else {}
+
+    def open_order(self, admin: str, description: str) -> str:
+        cpf = self.cpf()
+        status, body = self.http("POST", "/api/customers", admin, {"name": "Maria Silva", "document": cpf, "email": "maria@example.com"},
+                                 service="os")
+        customer = body.get("id", "") if isinstance(body, dict) else ""
+        if not self.check("os: cadastra a cliente", status == 201 and bool(customer), f"{status} {body}"[:200]):
+            return ""
+        # placa Mercosul: três letras, um dígito, uma letra, dois dígitos
+        letters = "".join(chr(65 + secrets.randbelow(26)) for _ in range(3))
+        plate = f"{letters}{secrets.randbelow(10)}{chr(65 + secrets.randbelow(26))}{secrets.randbelow(100):02d}"
+        status, body = self.http("POST", "/api/vehicles", admin, {"customer_id": customer, "license_plate": plate, "brand": "Fiat",
+                                                                 "model": "Uno", "year": 2015}, service="os")
+        vehicle = body.get("id", "") if isinstance(body, dict) else ""
+        if not self.check("os: cadastra o veículo", status == 201 and bool(vehicle), f"{status} {body}"[:200]):
+            return ""
+        status, body = self.http("POST", "/api/service-orders", admin, {"customer_id": customer, "vehicle_id": vehicle,
+                                                                       "description": description}, service="os")
+        self.check("os: abrir a OS devolve 201 com a saga no passo DIAGNOSIS",
+                   status == 201 and (body.get("saga") or {}).get("step") == "DIAGNOSIS", f"{status} {body}"[:300])
+        return body.get("id", "")
+
+    def to_payment(self, admin: str, os_id: str) -> dict:
+        """Diagnóstico, orçamento, aprovação e cobrança, cada um pelo serviço dono."""
+        self.round()
+        self.http("POST", f"/tasks/{os_id}/diagnosis/start", admin)
+        self.http("POST", f"/tasks/{os_id}/diagnosis/complete", admin,
+                  {"items": [{"service_item_id": SEED_SERVICE[0]}, {"part_id": SEED_PART[0], "quantity": 2}]})
+        self.round()
+        order = self.order(admin, os_id)
+        budget = order.get("budget_id") or ""
+        self.http("POST", f"/budgets/{budget}/approval", body={"approved": True}, service="faturamento",
+                  headers={"X-Webhook-Token": self.billing_env["WEBHOOK_TOKEN"]})
+        self.round()
+        self.round()
+        return self.order(admin, os_id)
+
+    def pay(self, os_id: str, admin: str) -> None:
+        order = self.order(admin, os_id)
+        payment_id = f"fake-approved-{order['budget_id']}-{round(order['total_amount'] * 100)}"
+        self.http("POST", f"/payments/webhook/mercadopago?data.id={payment_id}&type=payment", service="faturamento",
+                  headers={"x-request-id": "r", "x-signature": self.sign(payment_id, "r", "1731751200")})
+        self.round()
+
+    def run_saga(self) -> None:
+        print("\nFase 4: a saga inteira, pelos três serviços (cada um com o próprio banco e worker)", flush=True)
+        if not self.os_up():
+            return
+        status, body = self.http("POST", "/api/auth/login", body={"username": "admin", "password": self.os_env["ADMIN_PASSWORD"]}, service="os")
+        admin = body.get("token", "")
+        if not self.check("os: login do admin", status == 200 and bool(admin), f"{status} {body}"[:200]):
+            return
+        self.published()
+
+        os_id = self.open_order(admin, "Barulho no freio")
+        if not os_id:
+            return
+        order = self.to_payment(admin, os_id)
+        total = SEED_SERVICE[1] + 2 * SEED_PART[1]
+        self.check("orçamento do Faturamento chega à OS: total pelo catálogo e link de pagamento",
+                   order.get("status") == "AWAITING_PAYMENT" and abs(order.get("total_amount", 0) - total) < 0.001
+                   and str(order.get("payment_url", "")).startswith("https://"), str(order)[:300])
+
+        self.pay(os_id, admin)
+        order = self.order(admin, os_id)
+        self.check("pagamento confirmado: a OS vai para EXECUTING e a saga para o passo REPAIR",
+                   order.get("status") == "EXECUTING" and (order.get("saga") or {}).get("step") == "REPAIR", str(order)[:300])
+        status, body = self.http("GET", f"/tasks/{os_id}", admin)
+        self.check("a Execução recebeu a ordem de reparo: tarefa na fila de reparo", body.get("status") == "QUEUED_REPAIR", str(body)[:200])
+
+        self.http("POST", f"/tasks/{os_id}/repair/start", admin)
+        self.http("POST", f"/tasks/{os_id}/repair/complete", admin)
+        self.round()
+        order = self.order(admin, os_id)
+        saga = order.get("saga") or {}
+        self.check("reparo concluído: OS FINISHED e saga COMPLETED",
+                   order.get("status") == "FINISHED" and saga.get("state") == "COMPLETED", str(order)[:300])
+        self.check("a linha do tempo da saga registra todos os passos",
+                   [h["step"] for h in saga.get("history", []) if h["event"] == "step.entered"] == ["BUDGET", "APPROVAL", "PAYMENT", "REPAIR"],
+                   str(saga.get("history"))[:300])
+        status, body = self.http("POST", f"/api/service-orders/{os_id}/delivery", admin, service="os")
+        self.check("entrega manual: DELIVERED", status == 200 and body.get("status") == "DELIVERED", f"{status} {body}"[:200])
+        before = self.part_stock(admin)
+
+        # Compensação: o reparo falha depois do pagamento.
+        os_id = self.open_order(admin, "Embreagem patinando")
+        self.to_payment(admin, os_id)
+        self.pay(os_id, admin)
+        self.check("segunda OS paga: as 2 pastilhas saem do estoque", self.part_stock(admin) == (before[0] - 2, 0), str(self.part_stock(admin)))
+        self.http("POST", f"/tasks/{os_id}/repair/start", admin)
+        self.http("POST", f"/tasks/{os_id}/repair/fail", admin, {"reason": "peça com defeito"})
+        self.round()
+        order = self.order(admin, os_id)
+        self.check("reparo falhou: a OS vai para CANCELLED na hora e a saga compensa",
+                   order.get("status") == "CANCELLED" and (order.get("saga") or {}).get("state") in ("COMPENSATING", "COMPENSATED"), str(order)[:300])
+        self.round()
+        saga = self.order(admin, os_id).get("saga") or {}
+        self.check("estorno e cancelamento do orçamento confirmados: saga COMPENSATED",
+                   saga.get("state") == "COMPENSATED" and saga.get("pending_compensations") == [], str(saga)[:300])
+        self.check("as pastilhas voltam ao estoque", self.part_stock(admin) == before, str(self.part_stock(admin)))
+        status, body = self.http("GET", f"/budgets/by-order/{os_id}", admin, service="faturamento")
+        self.check("no Faturamento: orçamento CANCELLED com o pagamento REFUNDED",
+                   body.get("status") == "CANCELLED" and (body.get("payment") or {}).get("status") == "REFUNDED", str(body)[:300])
+
+        # Cancelamento pelo admin no meio da saga.
+        os_id = self.open_order(admin, "Revisão")
+        self.round()
+        status, body = self.http("POST", f"/api/service-orders/{os_id}/cancellation", admin, {"reason": "cliente desistiu"}, service="os")
+        self.round()
+        task = self.http("GET", f"/tasks/{os_id}", admin)[1]
+        saga = self.order(admin, os_id).get("saga") or {}
+        self.check("admin cancela no diagnóstico: a tarefa da Execução é cancelada e a saga COMPENSATED",
+                   status == 200 and task.get("status") == "CANCELLED" and saga.get("state") == "COMPENSATED", f"{status} {task} {saga}"[:300])
+

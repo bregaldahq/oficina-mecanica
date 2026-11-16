@@ -17,9 +17,9 @@ PRs antigos, a chave do state do Terraform, os roles de CI (`oficina-gha-<nome-a
 | `repos/oficina-infra-fundacao` | **Fundação**: VPC, subnets, RDS MySQL, *todos* os segredos, migrations SQL | Terraform | raríssimo |
 | `repos/oficina-infra-cluster` | **Cluster**: EKS, node group, add-ons Helm, ECR, NLB interno + target group, `ClusterSecretStore` | Terraform | ocasional |
 | `repos/oficina-gateway-auth` | **Borda**: Lambdas `auth-cpf` e `jwt-authorizer` (PHP/Bref), API Gateway, VPC Link | PHP 8.2 + Terraform | ocasional |
-| `repos/oficina-api` | **Aplicação**: API REST em PHP puro (DDD, Clean Architecture), `deploy/` em kustomize, Job de migration | PHP 8.2 | diário |
-| `repos/oficina-faturamento` | **Faturamento** (Fase 4, esqueleto): orçamento, estoque, pagamento; `deploy/` e `infra/` próprios | PHP 8.2 + Terraform | diário |
-| `repos/oficina-execucao` | **Execução** (Fase 4, esqueleto): fila da oficina, diagnóstico, reparo; `deploy/` e `infra/` próprios | PHP 8.2 + Terraform | diário |
+| `repos/oficina-api` | **OS** (Fase 4: orquestrador da saga): API REST em PHP puro (DDD, Clean Architecture), worker, `deploy/` em kustomize, `infra/` próprio, Job de migration | PHP 8.2 + Terraform | diário |
+| `repos/oficina-faturamento` | **Faturamento** (Fase 4): catálogo, estoque, orçamento, pagamento pelo Mercado Pago; MySQL, `deploy/` e `infra/` próprios | PHP 8.2 + Terraform | diário |
+| `repos/oficina-execucao` | **Execução** (Fase 4): fila da oficina, diagnóstico, reparo; DynamoDB, `deploy/` e `infra/` próprios | PHP 8.2 + Terraform | diário |
 
 Ordem de `apply`: **fundação → cluster → gateway → api**, e depois cada serviço da Fase 4
 (`infra/`, depois deploy). Ordem de `destroy`: inversa.
@@ -33,8 +33,10 @@ andamento estão em `docs/PLANO-FASE-4.md`; o desenho normativo, em
 
 - **O que roda em produção ainda é a Fase 3.** O resto deste arquivo descreve esse sistema. O
   contrato da Fase 4 soma ao da Fase 3, e cada item só vale depois de implementado.
-- Os dois repos novos são esqueletos: respondem `health` e `ready` sob o próprio prefixo
-  (`/api/billing`, `/api/execution`) e já têm imagem, manifests, `infra/` e pipelines.
+- Os três serviços estão implementados e a saga atravessa os três (`bin/ws e2e --fase4`). Cada
+  um tem prefixo próprio no gateway (`/api/...` para a OS, `/api/billing`, `/api/execution`),
+  worker, `infra/`, pipelines com cobertura mínima de 80% e BDD. Falta a `auth-cpf` deixar o
+  banco da OS (Etapa 6 do plano).
 - Nos comandos, os nomes curtos novos são `faturamento` e `execucao`.
 - Os serviços conversam por mensagens (SNS + SQS), nunca por HTTP entre si nem pelo banco um
   do outro. Tipo de mensagem novo entra no catálogo (§5 do contrato da Fase 4), no produtor e
@@ -254,10 +256,8 @@ IaC é `fmt` + `validate` sem backend.
   duas vezes num MySQL 8.0 com a conferência do seed;
 - **cluster:** `fmt`, `validate` e `tflint` (não bloqueante, como no CI);
 - **gateway:** composer, contrato do JWT, phpunit, phpstan, `fmt` e `validate`;
-- **aplicação:** composer, php-cs-fixer, phpstan, phpunit e `kustomize build` dos dois overlays,
-  e o build da imagem de produção com `--image`;
-- **faturamento e execução:** composer, php-cs-fixer, phpstan, testes com cobertura mínima de
-  80%, `kustomize build`, `fmt` e `validate` do `infra/`, e a imagem com `--image`;
+- **OS, faturamento e execução:** composer, php-cs-fixer, phpstan, testes com cobertura mínima
+  de 80%, Behat, `kustomize build`, `fmt` e `validate` do `infra/`, e a imagem com `--image`;
 - **workspace:** shellcheck, Python, os testes de `tests/` e `check-contracts`.
 
 O passo `workflows` (actionlint) confere a sintaxe dos workflows de todos os repos e bloqueia. Leva cerca de 30 s com tudo; `--changed` olha
@@ -273,10 +273,12 @@ da `auth-cpf` aceito pela aplicação, o `jwt-authorizer`, a matriz de autoriza�
 Leva cerca de 30 s e usa a branch em disco de cada repo. Ele pega quebras entre repos que os
 testes de cada repo não pegam.
 
-Com o `oficina-execucao` em disco, o `e2e` roda também a parte da Fase 4 (`bin/e2e_fase4.py`,
-mais cerca de 1 min): sobe um LocalStack (SNS, SQS, DynamoDB), faz o papel do orquestrador
-publicando comandos no tópico, age como o mecânico pela API e confere, numa fila de sonda, o
-que o serviço publicou. `--fase3` e `--fase4` rodam só uma das partes.
+Com os repos da Fase 4 em disco, o `e2e` roda também a parte da Fase 4 (`bin/e2e_fase4.py`,
+cerca de 3 min): sobe um LocalStack (SNS, SQS, DynamoDB) e os bancos de cada serviço, testa a
+Execução e o Faturamento um a um (fazendo o papel do orquestrador e conferindo numa fila de
+sonda o que publicam) e depois **a saga inteira pelos três serviços**: caminho feliz, reparo que
+falha com estorno e devolução de peças, e cancelamento pelo admin. `--fase3` e `--fase4` rodam
+só uma das partes.
 
 Para um comando avulso, use `bin/ws exec <repo> <cmd>`, por exemplo
 `bin/ws exec gateway vendor/bin/phpunit --filter Jwt`. Nos repos, o `make install/test/stan` do

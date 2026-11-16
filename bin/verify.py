@@ -199,18 +199,8 @@ STEPS: dict[str, list[Step]] = {
         Step("tf-validate", TF_VALIDATE, "pr.yml: terraform validate"),
         Step("workflows", ACTIONLINT, "fora do CI: workflow inválido nem carrega no GitHub"),
     ],
-    "oficina-api": [
-        Step("composer", COMPOSER, "pr.yml: composer install"),
-        # --using-cache=no: o .php-cs-fixer.cache da aplicação é versionado e o dry-run o reescreve.
-        Step("cs-fixer", tool("PHP_CS_FIXER_IGNORE_ENV=1 vendor/bin/php-cs-fixer fix --dry-run --diff --using-cache=no"),
-             "pr.yml: estilo (PSR-12)"),
-        Step("phpstan", tool("vendor/bin/phpstan analyse --no-progress --memory-limit=512M"), "pr.yml: PHPStan"),
-        Step("phpunit", tool("vendor/bin/phpunit --no-coverage"), "pr.yml: testes unitários e de integração"),
-        Step("kustomize", tool("kustomize build deploy/overlays/hml >/dev/null"
-                               " && kustomize build deploy/overlays/prod >/dev/null"), "pr.yml: manifests"),
-        Step("image", app_image, "pr.yml: build da imagem e extensão New Relic", image=True),
-        Step("workflows", ACTIONLINT, "fora do CI: workflow inválido nem carrega no GitHub"),
-    ],
+    # Fase 4: o serviço de OS tem a mesma forma dos outros dois (cobertura de 80%, Behat, infra/).
+    "oficina-api": SERVICE_STEPS,
     WORKSPACE: [
         Step("shellcheck", tool("shellcheck -x bin/ws bin/tooling .claude/hooks/*.sh githooks/* evals/lib.sh evals/*/*.sh bootstrap/aws/github.sh"), "-"),
         Step("python", python_compiles, "-"),
