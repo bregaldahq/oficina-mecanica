@@ -7,8 +7,11 @@ tópico, age como o mecânico pela API e lê, numa fila de sonda, o que o servi�
 Cobre o que os testes do repo, com adaptadores em memória, não alcançam: o desenho da tabela
 num DynamoDB de verdade, a transação com inbox e outbox, o filtro da assinatura e o worker.
 
-Por enquanto só o serviço de Execução; os outros entram conforme forem implementados.
+Serviços cobertos: Execução (DynamoDB) e, se estiver em disco, Faturamento (MySQL próprio,
+com as migrations do repo e o meio de pagamento falso, mas o webhook assinado de verdade).
 """
+import hashlib
+import hmac
 import json
 import os
 import secrets
@@ -23,43 +26,61 @@ LOCALSTACK_IMAGE = "localstack/localstack:3.8"
 # O que o serviço de OS consome da Execução (docs/fase-4/CONTRATOS.md §5.3): o filtro da sonda.
 EXECUTION_EVENTS = ["diagnosis.started", "diagnosis.completed", "diagnosis.failed", "repair.started",
                     "repair.completed", "repair.failed", "execution.cancelled"]
+BILLING_EVENTS = ["budget.generated", "budget.failed", "budget.approved", "budget.rejected", "budget.cancelled",
+                  "payment.created", "payment.confirmed", "payment.failed", "payment.refunded"]
+# Do seed 002_catalogo_demo.sql do Faturamento (os mesmos ids da Fase 3).
+SEED_SERVICE = ("c597dc97-5a51-497c-acdb-3ae16aab815e", 180.00)  # troca de óleo e filtro
+SEED_PART = ("b4e35f65-d29c-5474-b009-21263ff5c64f", 189.00, 60)  # pastilha de freio, 60 em estoque
 
 
 class Fase4E2E:
     def __init__(self, check):
         self.check = check
         self.repo = repos_dir() / "oficina-execucao"
+        self.billing = repos_dir() / "oficina-faturamento"
         self.net = f"oficina-e2e4-{os.getpid()}"
         self.ls, self.app = f"{self.net}-aws", f"{self.net}-execucao"
+        self.db, self.billing_app = f"{self.net}-db", f"{self.net}-faturamento"
         self.env = {"JWT_SECRET": secrets.token_hex(32), "JWT_EXPIRATION": "3600", "APP_ENV": "hml",
                     "AWS_REGION": "us-east-1", "AWS_ENDPOINT_URL": f"http://{self.ls}:4566",
                     "WORKER_MAX_TICKS": "1", "WORKER_WAIT_SECONDS": "2"}
+        self.billing_env = {"DB_HOST": self.db, "DB_PORT": "3306", "DB_DATABASE": "oficina_faturamento",
+                            "DB_USERNAME": "root", "DB_PASSWORD": "root", "WEBHOOK_TOKEN": secrets.token_hex(16),
+                            "MP_WEBHOOK_SECRET": secrets.token_hex(16), "PAYMENT_GATEWAY": "fake"}
         self.sequence = 0
+        self.probe = ""
 
     def available(self) -> bool:
         return (self.repo / "bin" / "worker.php").is_file()
+
+    def billing_available(self) -> bool:
+        return (self.billing / "bin" / "worker.php").is_file() and (self.billing / "migrations").is_dir()
 
     # ── infraestrutura ──────────────────────────────────────────────────────────────────────
     def aws(self, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess:
         return subprocess.run(["docker", "exec", "-i", self.ls, *args], input=stdin, capture_output=True, text=True)
 
-    def php(self, *args: str, detach: bool = False) -> subprocess.CompletedProcess:
+    def php(self, *args: str, detach: bool = False, billing: bool = False) -> subprocess.CompletedProcess:
+        repo, name = (self.billing, self.billing_app) if billing else (self.repo, self.app)
         image = subprocess.run([str(TOOLING), "image"], capture_output=True, text=True, check=True).stdout.strip()
         cmd = ["docker", "run", "--rm", "--network", self.net, "-u", f"{os.getuid()}:{os.getgid()}", "-e", "HOME=/tmp",
-               "-v", f"{self.repo.resolve()}:/w", "-w", "/w"]
-        if (self.repo / ".env").exists():  # o serviço carrega o .env e ele sobrescreveria este ambiente
+               "-v", f"{repo.resolve()}:/w", "-w", "/w"]
+        if (repo / ".env").exists():  # o serviço carrega o .env e ele sobrescreveria este ambiente
             cmd += ["-v", "/dev/null:/w/.env:ro"]
-        for key, value in self.env.items():
+        for key, value in {**self.env, **(self.billing_env if billing else {})}.items():
             cmd += ["-e", f"{key}={value}"]
         if detach:
-            cmd[2:2] = ["-d", "--name", self.app]
+            cmd[2:2] = ["-d", "--name", name]
         return subprocess.run(cmd + [image, *args], capture_output=True, text=True)
 
-    def http(self, method: str, path: str, token: str = "", body: dict | None = None):
-        cmd = ["docker", "exec", self.app, "curl", "-s", "-X", method, "-w", "\n%{http_code}",
-               f"http://127.0.0.1:8080/api/execution{path}"]
+    def http(self, method: str, path: str, token: str = "", body: dict | None = None, billing: bool = False,
+             headers: dict | None = None):
+        app, prefix = (self.billing_app, "/api/billing") if billing else (self.app, "/api/execution")
+        cmd = ["docker", "exec", app, "curl", "-s", "-X", method, "-w", "\n%{http_code}", f"http://127.0.0.1:8080{prefix}{path}"]
         if token:
             cmd += ["-H", f"Authorization: Bearer {token}"]
+        for key, value in (headers or {}).items():
+            cmd += ["-H", f"{key}: {value}"]
         if body is not None:
             cmd += ["-H", "Content-Type: application/json", "-d", json.dumps(body)]
         text, _, status = subprocess.run(cmd, capture_output=True, text=True).stdout.rpartition("\n")
@@ -90,6 +111,14 @@ class Fase4E2E:
                           init.returncode == 0 and len(created) == 3, init.stderr.strip()[-300:]):
             return False
         self.env.update(created)
+        if self.billing_available():
+            init = self.aws("env", "ENVIRONMENT=e2e", "sh", stdin=(self.billing / "scripts" / "localstack-init.sh").read_text())
+            created = dict(line.split("=", 1) for line in init.stdout.splitlines() if "=" in line)
+            if not self.check("faturamento: localstack-init.sh cria a fila e assina o mesmo tópico",
+                              init.returncode == 0 and created.get("MESSAGING_TOPIC_ARN") == self.env["MESSAGING_TOPIC_ARN"],
+                              init.stderr.strip()[-300:]):
+                return False
+            self.billing_env["MESSAGING_QUEUE_URL"] = created["MESSAGING_QUEUE_URL"]
 
         # A fila de sonda faz o papel da fila do serviço de OS: recebe o que a Execução publica.
         probe = self.aws("sh", "-ec", """
@@ -98,7 +127,7 @@ class Fase4E2E:
             awslocal sns subscribe --topic-arn "$1" --protocol sqs --notification-endpoint "$arn" \\
               --attributes "{\\"RawMessageDelivery\\":\\"true\\",\\"FilterPolicy\\":$2}" >/dev/null
             echo "$url"
-        """, "sh", self.env["MESSAGING_TOPIC_ARN"], json.dumps(json.dumps({"type": EXECUTION_EVENTS})))
+        """, "sh", self.env["MESSAGING_TOPIC_ARN"], json.dumps(json.dumps({"type": EXECUTION_EVENTS + BILLING_EVENTS})))
         self.probe = probe.stdout.strip()
         if not self.check("fila de sonda assinada no tópico", probe.returncode == 0 and bool(self.probe), probe.stderr[-200:]):
             return False
@@ -111,10 +140,14 @@ class Fase4E2E:
         return self.check("API da Execução de pé", False, "GET /api/execution/health não respondeu")
 
     def down(self) -> None:
-        subprocess.run(["docker", "rm", "-f", self.app, self.ls], capture_output=True)
+        subprocess.run(["docker", "rm", "-f", self.app, self.ls, self.db, self.billing_app], capture_output=True)
         subprocess.run(["docker", "network", "rm", self.net], capture_output=True)
 
     # ── papéis ──────────────────────────────────────────────────────────────────────────────
+    def token(self, sub: str, role: str) -> str:
+        return self.php("php", "-r", 'require "vendor/autoload.php"; echo (new App\\Infrastructure\\Security\\JwtProvider('
+                        f'getenv("JWT_SECRET"), 3600))->generate(["sub" => "{sub}", "role" => "{role}"]);').stdout.strip()
+
     def command(self, type_: str, os_id: str, payload: dict, message_id: str = "") -> str:
         """O orquestrador publica um comando no tópico. Devolve o id da mensagem."""
         self.sequence += 1
@@ -129,9 +162,9 @@ class Fase4E2E:
             self.check(f"publicar {type_}", False, out.stderr[-200:])
         return message_id
 
-    def worker(self) -> list[dict]:
+    def worker(self, billing: bool = False) -> list[dict]:
         """Uma volta do worker (outbox + fila). Devolve as linhas de log estruturado."""
-        out = self.php("php", "bin/worker.php")
+        out = self.php("php", "bin/worker.php", billing=billing)
         lines = []
         for line in out.stdout.splitlines():
             try:
@@ -175,7 +208,7 @@ class Fase4E2E:
         diagnosis = {"customer_name": "Maria Silva", "description": "Barulho no freio",
                      "vehicle": {"license_plate": "ABC1D23", "brand": "Fiat", "model": "Uno"}}
         first = self.command("execution.request-diagnosis", os_id, diagnosis)
-        self.command("budget.generated", os_id, {})  # tipo de outro serviço: o filtro da fila não deixa passar
+        self.command("os.tipo-que-ninguem-assina", os_id, {})  # o filtro da fila não deixa passar
         logs = self.worker()
         self.check("worker trata execution.request-diagnosis; o filtro da fila barra o tipo alheio",
                    self.outcomes(logs) == ["ok"], json.dumps(logs)[-300:])
@@ -224,3 +257,123 @@ class Fase4E2E:
         self.check("a linha do tempo da tarefa está completa e em ordem",
                    timeline == ["task.opened", "diagnosis.started", "diagnosis.completed", "repair.queued", "repair.started",
                                 "repair.failed"], str(timeline))
+
+        if self.billing_available():
+            self.run_billing()
+
+    # ── Faturamento ─────────────────────────────────────────────────────────────────────────
+    def sign(self, data_id: str, request_id: str, ts: str) -> str:
+        """O x-signature como o Mercado Pago mandaria (o mesmo manifesto que o serviço confere)."""
+        manifest = f"id:{data_id.lower()};request-id:{request_id};ts:{ts};"
+        digest = hmac.new(self.billing_env["MP_WEBHOOK_SECRET"].encode(), manifest.encode(), hashlib.sha256).hexdigest()
+        return f"ts={ts},v1={digest}"
+
+    def billing_up(self) -> bool:
+        if not (self.billing / "vendor" / "autoload.php").is_file():
+            print(f"composer install em {self.billing.name}...", flush=True)
+            subprocess.run([str(TOOLING), "run", str(self.billing), "composer", "install", "--no-interaction", "--quiet"], check=True)
+        subprocess.run(["docker", "run", "-d", "--rm", "--name", self.db, "--network", self.net, "-e", "MYSQL_ROOT_PASSWORD=root",
+                        "-e", "MYSQL_DATABASE=oficina_faturamento", "mysql:8.0"], capture_output=True, check=True)
+        for _ in range(90):
+            if subprocess.run(["docker", "exec", self.db, "mysql", "-h127.0.0.1", "-uroot", "-proot", "-e", "SELECT 1"],
+                              capture_output=True).returncode == 0:
+                break
+            time.sleep(2)
+        else:
+            return self.check("faturamento: MySQL de pé", False, "não respondeu em 180 s")
+
+        for rodada in ("1ª vez", "2ª vez, idempotente"):
+            out = self.php("php", "bin/migrate.php", billing=True)
+            if not self.check(f"faturamento: migrations do próprio repo, {rodada}", out.returncode == 0, (out.stdout + out.stderr)[-300:]):
+                return False
+
+        self.php("php", "-S", "0.0.0.0:8080", "-t", "public", "public/index.php", detach=True, billing=True)
+        for _ in range(30):
+            if self.http("GET", "/health", billing=True)[0] == 200:
+                return True
+            time.sleep(1)
+        return self.check("faturamento: API de pé", False, "GET /api/billing/health não respondeu")
+
+    def part_stock(self, admin: str) -> tuple[int, int]:
+        body = self.http("GET", f"/parts/{SEED_PART[0]}", admin, billing=True)[1]
+        return body.get("stock_quantity", -1), body.get("reserved_quantity", -1)
+
+    def run_billing(self) -> None:
+        print("\nFase 4: serviço de Faturamento (MySQL próprio, Mercado Pago falso, webhook assinado)", flush=True)
+        if not self.billing_up():
+            return
+        admin, owner, other = self.token("admin", "admin"), self.token("cli-e2e", "customer"), self.token("outro", "customer")
+        os_id = "os-e2e-fat"
+        self.published()  # descarta o que sobrou da parte da Execução
+
+        status, body = self.http("GET", "/ready", billing=True)
+        self.check("GET /api/billing/ready 200 (toca o MySQL do serviço)", status == 200 and body.get("database") == "connected", str(body))
+        status, body = self.http("GET", "/service-items", admin, billing=True)
+        self.check("o catálogo veio do seed com os ids da Fase 3", status == 200 and SEED_SERVICE[0] in [i["id"] for i in body.get("data", [])],
+                   str(body)[:200])
+        self.check("catálogo sem token: 401; com token de cliente: 403",
+                   self.http("GET", "/parts", billing=True)[0] == 401 and self.http("GET", "/parts", owner, billing=True)[0] == 403)
+
+        generate = {"customer": {"id": "cli-e2e", "name": "Maria Silva", "email": "maria@example.com"},
+                    "items": [{"kind": "service", "id": SEED_SERVICE[0], "quantity": 1}, {"kind": "part", "id": SEED_PART[0], "quantity": 2}]}
+        self.command("billing.generate-budget", os_id, generate)
+        self.check("worker trata billing.generate-budget", self.outcomes(self.worker(billing=True)) == ["ok"])
+        events = self.published()
+        total = SEED_SERVICE[1] + 2 * SEED_PART[1]
+        self.check("budget.generated chega ao tópico com o total pelo preço do catálogo",
+                   [e["type"] for e in events] == ["budget.generated"] and abs(events[0]["payload"]["total_amount"] - total) < 0.001,
+                   str(events)[:300])
+        self.check("as 2 pastilhas ficam reservadas no estoque", self.part_stock(admin) == (SEED_PART[2], 2), str(self.part_stock(admin)))
+        status, body = self.http("GET", f"/budgets/by-order/{os_id}", owner, billing=True)
+        budget_id = body.get("id", "")
+        self.check("o cliente dono vê o orçamento; outro cliente recebe 404",
+                   status == 200 and body.get("status") == "AWAITING_APPROVAL"
+                   and self.http("GET", f"/budgets/{budget_id}", other, billing=True)[0] == 404, str(body)[:200])
+
+        self.check("webhook de aprovação com X-Webhook-Token errado: 401",
+                   self.http("POST", f"/budgets/{budget_id}/approval", body={"approved": True}, billing=True,
+                             headers={"X-Webhook-Token": "errado"})[0] == 401)
+        status, body = self.http("POST", f"/budgets/{budget_id}/approval", body={"approved": True}, billing=True,
+                                 headers={"X-Webhook-Token": self.billing_env["WEBHOOK_TOKEN"]})
+        events = self.published()
+        self.check("cliente aprova: a API publica budget.approved sem esperar o worker",
+                   status == 200 and [e["type"] for e in events] == ["budget.approved"], f"{status} {events}"[:300])
+
+        self.command("billing.charge", os_id, {"budget_id": budget_id})
+        self.check("worker trata billing.charge", self.outcomes(self.worker(billing=True)) == ["ok"])
+        events = self.published()
+        self.check("payment.created chega com o link de pagamento",
+                   [e["type"] for e in events] == ["payment.created"] and events[0]["payload"].get("payment_url", "").startswith("https://"),
+                   str(events)[:300])
+
+        payment_id = f"fake-approved-{budget_id}-{round(total * 100)}"
+        path = f"/payments/webhook/mercadopago?data.id={payment_id}&type=payment"
+        self.check("notificação do Mercado Pago com assinatura falsa: 401",
+                   self.http("POST", path, billing=True, headers={"x-request-id": "r1", "x-signature": "ts=1,v1=00"})[0] == 401)
+        status, body = self.http("POST", path, billing=True, headers={"x-request-id": "r1", "x-signature": self.sign(payment_id, "r1", "1731751200")})
+        events = self.published()
+        self.check("notificação assinada confirma o pagamento e publica payment.confirmed na hora",
+                   status == 200 and body.get("outcome") == "ok" and [e["type"] for e in events] == ["payment.confirmed"], f"{status} {body} {events}"[:300])
+        status, body = self.http("POST", path, billing=True, headers={"x-request-id": "r2", "x-signature": self.sign(payment_id, "r2", "1731751300")})
+        self.check("o Mercado Pago reenvia a notificação: duplicata, sem efeito", body.get("outcome") == "duplicate", str(body))
+        self.check("pago: as peças saem do estoque", self.part_stock(admin) == (SEED_PART[2] - 2, 0), str(self.part_stock(admin)))
+
+        self.command("billing.refund-payment", os_id, {"budget_id": budget_id, "reason": "reparo falhou"})
+        self.command("billing.cancel-budget", os_id, {"budget_id": budget_id, "reason": "reparo falhou"})
+        self.check("worker trata o estorno e o cancelamento (compensação do reparo que falhou)",
+                   sorted(self.outcomes(self.worker(billing=True))) == ["ok", "ok"])
+        events = self.published()
+        self.check("payment.refunded e budget.cancelled chegam ao tópico",
+                   sorted(e["type"] for e in events) == ["budget.cancelled", "payment.refunded"], str([e["type"] for e in events]))
+        self.check("cancelado depois de pago: as peças voltam ao estoque", self.part_stock(admin) == (SEED_PART[2], 0), str(self.part_stock(admin)))
+        status, body = self.http("GET", f"/budgets/{budget_id}", admin, billing=True)
+        self.check("o orçamento termina CANCELLED com o pagamento REFUNDED",
+                   body.get("status") == "CANCELLED" and (body.get("payment") or {}).get("status") == "REFUNDED", str(body)[:300])
+
+        self.command("billing.generate-budget", "os-e2e-sem-estoque",
+                     {**generate, "items": [{"kind": "part", "id": SEED_PART[0], "quantity": SEED_PART[2] + 1}]})
+        self.worker(billing=True)
+        events = self.published()
+        self.check("estoque insuficiente: budget.failed com INSUFFICIENT_STOCK e nada reservado",
+                   [(e["type"], e["payload"].get("reason")) for e in events] == [("budget.failed", "INSUFFICIENT_STOCK")]
+                   and self.part_stock(admin) == (SEED_PART[2], 0), str(events)[:300])
