@@ -74,20 +74,19 @@ autor só). Os jobs de `plan` dos repos de infra ficam de fora: dependem da cont
 
 ## 4. Merges, na ordem
 
-Os PRs da Fase 4 estão empilhados: cada etapa parte da anterior no mesmo repositório. Faça o
-merge **com merge commit** (não *squash*), de baixo para cima; o GitHub muda a base do PR seguinte
-para `develop` sozinho quando a branch de baixo é apagada. Merge em `develop` dispara o deploy em
-hml.
+Um PR por repositório (as pilhas antigas se desfizeram no merge: o GitHub fechou os PRs cuja
+base foi apagada). Merge em `develop` dispara o deploy em hml. Nos repositórios antigos a
+`develop` exige uma aprovação: como dono, use `gh pr merge <n> --merge --admin`.
 
 | # | Repositório | PR | Antes, confirme |
 |---|---|---|---|
-| 1 | fundação | [#15](https://github.com/bregaldahq/oficina-infra-fundacao/pull/15) migration 004 da saga | — |
-| 2 | faturamento | [#1](https://github.com/bregaldahq/oficina-faturamento/pull/1), [#2](https://github.com/bregaldahq/oficina-faturamento/pull/2), [#3](https://github.com/bregaldahq/oficina-faturamento/pull/3) | passo 2 (Mercado Pago) feito logo após o deploy |
-| 3 | execucao | [#1](https://github.com/bregaldahq/oficina-execucao/pull/1), [#2](https://github.com/bregaldahq/oficina-execucao/pull/2), [#3](https://github.com/bregaldahq/oficina-execucao/pull/3) | — |
-| 4 | api | [#28](https://github.com/bregaldahq/oficina-api/pull/28), [#29](https://github.com/bregaldahq/oficina-api/pull/29), [#30](https://github.com/bregaldahq/oficina-api/pull/30), [#31](https://github.com/bregaldahq/oficina-api/pull/31), [#32](https://github.com/bregaldahq/oficina-api/pull/32) | Faturamento e Execução no ar em hml; `bootstrap/aws/` reaplicado |
-| 5 | gateway | [#14](https://github.com/bregaldahq/oficina-gateway-auth/pull/14), depois [#15](https://github.com/bregaldahq/oficina-gateway-auth/pull/15) | o OS da Etapa 5 no ar (a `auth-cpf` nova chama a rota interna dele) |
-| 6 | fundação | [#16](https://github.com/bregaldahq/oficina-infra-fundacao/pull/16) migration 005 | o OS da Etapa 5 no ar em hml e estável: depois da 005, voltar a imagem do OS para a da Fase 3 não funciona mais (ela lê as tabelas que a 005 apaga) |
-| 7 | workspace | [#11](https://github.com/bregaldahq/oficina-mecanica/pull/11) (reúne o que os #7 a #10 tinham; o #6 já está na `main`) | depois do gateway (o e2e usa a `auth-cpf` nova) |
+| 1 | fundação | migration 004: já na `develop` (#15) | — |
+| 2 | faturamento | [#4](https://github.com/bregaldahq/oficina-faturamento/pull/4) (o serviço já está na `develop`, #1) | passo 2 (Mercado Pago) feito logo após o deploy |
+| 3 | execucao | [#4](https://github.com/bregaldahq/oficina-execucao/pull/4) (o serviço já está na `develop`, #1) | — |
+| 4 | api | [#33](https://github.com/bregaldahq/oficina-api/pull/33): a saga, a borda, a observabilidade e a entrega (só o #28 entrou na `develop`) | Faturamento e Execução no ar em hml; `bootstrap/aws/` reaplicado |
+| 5 | gateway | [#16](https://github.com/bregaldahq/oficina-gateway-auth/pull/16) (os prefixos por serviço já estão na `develop`, #14) | a OS da Fase 4 no ar (a `auth-cpf` nova chama a rota interna dela) |
+| 6 | fundação | [#17](https://github.com/bregaldahq/oficina-infra-fundacao/pull/17), rascunho: migration 005 | a OS da Fase 4 no ar em hml e estável: depois da 005, voltar a imagem da OS para a da Fase 3 não funciona mais |
+| 7 | workspace | [#11](https://github.com/bregaldahq/oficina-mecanica/pull/11) (reúne o que os #7 a #10 tinham; o #6 já está na `main`) | — |
 
 Ainda abertos da Fase 3, para você decidir: api [#20](https://github.com/bregaldahq/oficina-api/pull/20),
 fundação [#6](https://github.com/bregaldahq/oficina-infra-fundacao/pull/6) e
