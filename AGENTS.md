@@ -1,7 +1,7 @@
 # Oficina Mecânica — repositório principal
 
 Este é o repositório principal do projeto, `oficina-mecanica`, mas ele não tem código de produto.
-Ele junta os quatro repositórios do sistema da Oficina Mecânica (Tech Challenge SOAT, Fase 3)
+Ele junta os seis repositórios do sistema da Oficina Mecânica (Tech Challenge SOAT, Fases 3 e 4)
 para que um agente, ou uma pessoa, enxergue e mude o sistema inteiro de um lugar só. Os
 repositórios ficam em `repos/`, que não é versionado aqui: cada um continua com o próprio Git, as
 próprias branches e o próprio CI.
@@ -17,24 +17,28 @@ PRs antigos, a chave do state do Terraform, os roles de CI (`oficina-gha-<nome-a
 | `repos/oficina-infra-fundacao` | **Fundação**: VPC, subnets, RDS MySQL, *todos* os segredos, migrations SQL | Terraform | raríssimo |
 | `repos/oficina-infra-cluster` | **Cluster**: EKS, node group, add-ons Helm, ECR, NLB interno + target group, `ClusterSecretStore` | Terraform | ocasional |
 | `repos/oficina-gateway-auth` | **Borda**: Lambdas `auth-cpf` e `jwt-authorizer` (PHP/Bref), API Gateway, VPC Link | PHP 8.2 + Terraform | ocasional |
-| `repos/oficina-api` | **Aplicação**: API REST em PHP puro (DDD, Clean Architecture), `deploy/` em kustomize, Job de migration | PHP 8.2 | diário |
-| `repos/oficina-faturamento` | **Faturamento** (Fase 4, esqueleto): orçamento, estoque, pagamento; `deploy/` e `infra/` próprios | PHP 8.2 + Terraform | diário |
-| `repos/oficina-execucao` | **Execução** (Fase 4, esqueleto): fila da oficina, diagnóstico, reparo; `deploy/` e `infra/` próprios | PHP 8.2 + Terraform | diário |
+| `repos/oficina-api` | **OS** (Fase 4: orquestrador da saga): API REST em PHP puro (DDD, Clean Architecture), worker, `deploy/` em kustomize, `infra/` próprio, Job de migration | PHP 8.2 + Terraform | diário |
+| `repos/oficina-faturamento` | **Faturamento** (Fase 4): catálogo, estoque, orçamento, pagamento pelo Mercado Pago; MySQL, `deploy/` e `infra/` próprios | PHP 8.2 + Terraform | diário |
+| `repos/oficina-execucao` | **Execução** (Fase 4): fila da oficina, diagnóstico, reparo; DynamoDB, `deploy/` e `infra/` próprios | PHP 8.2 + Terraform | diário |
 
 Ordem de `apply`: **fundação → cluster → gateway → api**, e depois cada serviço da Fase 4
 (`infra/`, depois deploy). Ordem de `destroy`: inversa.
 
-## Fase 4 em andamento
+## Fase 4
 
-O sistema está sendo dividido em três microsserviços: o `oficina-api` vira o serviço de OS (e
-orquestrador da saga), e nascem o `oficina-faturamento` e o `oficina-execucao`. O plano e o
+O sistema foi dividido em três microsserviços: o `oficina-api` virou o serviço de OS (e
+orquestrador da saga), e nasceram o `oficina-faturamento` e o `oficina-execucao`. O plano e o
 andamento estão em `docs/PLANO-FASE-4.md`; o desenho normativo, em
-`repos/oficina-api/docs/fase-4/` (`CONTRATOS.md`, ADRs 011 a 017, diagramas).
+`repos/oficina-api/docs/fase-4/` (`CONTRATOS.md`, adendos F4-1 a F4-5, ADRs 011 a 017,
+diagramas). O que falta para pôr no ar (passos do usuário) está em `docs/ROTEIRO-ENTREGA.md`.
 
-- **O que roda em produção ainda é a Fase 3.** O resto deste arquivo descreve esse sistema. O
-  contrato da Fase 4 soma ao da Fase 3, e cada item só vale depois de implementado.
-- Os dois repos novos são esqueletos: respondem `health` e `ready` sob o próprio prefixo
-  (`/api/billing`, `/api/execution`) e já têm imagem, manifests, `infra/` e pipelines.
+- **Implementada nos seis repos, em PRs empilhados; o que roda nos ambientes é o que já entrou
+  em `develop`/`main`.** Partes deste arquivo ainda descrevem o sistema da Fase 3 (o desenho de
+  ponta a ponta abaixo, por exemplo); o contrato da Fase 4 soma ao da Fase 3.
+- Os três serviços estão implementados e a saga atravessa os três (`bin/ws e2e --fase4`, e a
+  coleção Postman com `bin/ws e2e --postman`). Cada um tem prefixo próprio no gateway (`/api/...`
+  para a OS, `/api/billing`, `/api/execution`), worker, `infra/`, pipelines com cobertura mínima
+  de 80% e BDD. A `auth-cpf` consulta o cliente na rota interna da OS e não lê mais o banco dela.
 - Nos comandos, os nomes curtos novos são `faturamento` e `execucao`.
 - Os serviços conversam por mensagens (SNS + SQS), nunca por HTTP entre si nem pelo banco um
   do outro. Tipo de mensagem novo entra no catálogo (§5 do contrato da Fase 4), no produtor e
@@ -174,7 +178,7 @@ bin/ws ci [<branch>]               # último run de cada workflow; log do que fa
 bin/ws diff [--patch]              # o que mudou contra origin/develop
 bin/ws grep -E 'padrão'            # busca nos quatro repos (só arquivos versionados ou novos)
 bin/ws verify [--changed] [--fast] # o que o pr.yml roda, local e sem AWS (ver "Validação local")
-bin/ws e2e                         # ponta a ponta entre os repos, sem AWS: migrations, app, Lambdas, JWT
+bin/ws e2e [--postman]             # ponta a ponta entre os repos, sem AWS; --postman roda a coleção da Fase 4
 bin/ws exec <repo> <cmd...>        # comando na imagem de ferramentas (PHP, Composer, Terraform...)
 bin/ws branch <nome> <repo...>     # mesma branch nos repos indicados, a partir de origin/develop
 bin/ws isolate <b> <repo...>       # worktrees próprios desta sessão (sessões paralelas)
@@ -254,13 +258,11 @@ IaC é `fmt` + `validate` sem backend.
   duas vezes num MySQL 8.0 com a conferência do seed;
 - **cluster:** `fmt`, `validate` e `tflint` (não bloqueante, como no CI);
 - **gateway:** composer, contrato do JWT, phpunit, phpstan, `fmt` e `validate`;
-- **aplicação:** composer, php-cs-fixer, phpstan, phpunit e `kustomize build` dos dois overlays,
-  e o build da imagem de produção com `--image`;
-- **faturamento e execução:** composer, php-cs-fixer, phpstan, testes com cobertura mínima de
-  80%, `kustomize build`, `fmt` e `validate` do `infra/`, e a imagem com `--image`;
+- **OS, faturamento e execução:** composer, php-cs-fixer, phpstan, testes com cobertura mínima
+  de 80%, Behat, `kustomize build`, `fmt` e `validate` do `infra/`, e a imagem com `--image`;
 - **workspace:** shellcheck, Python, os testes de `tests/` e `check-contracts`.
 
-O passo `workflows` (actionlint) confere a sintaxe dos workflows de todos os repos e bloqueia. Leva cerca de 30 s com tudo; `--changed` olha
+O passo `workflows` (actionlint) confere a sintaxe dos workflows de todos os repos e bloqueia; ele também acusa pipe para `tee`, `head`, `sed`... sem `pipefail`, que esconderia a falha do passo. Leva cerca de 30 s com tudo; `--changed` olha
 só os repos com mudança, e `--fast` pula as migrations. O resultado vai para
 `.ws/verify/latest.json` e os logs para `.ws/verify/logs/`.
 
@@ -273,10 +275,18 @@ da `auth-cpf` aceito pela aplicação, o `jwt-authorizer`, a matriz de autoriza�
 Leva cerca de 30 s e usa a branch em disco de cada repo. Ele pega quebras entre repos que os
 testes de cada repo não pegam.
 
-Com o `oficina-execucao` em disco, o `e2e` roda também a parte da Fase 4 (`bin/e2e_fase4.py`,
-mais cerca de 1 min): sobe um LocalStack (SNS, SQS, DynamoDB), faz o papel do orquestrador
-publicando comandos no tópico, age como o mecânico pela API e confere, numa fila de sonda, o
-que o serviço publicou. `--fase3` e `--fase4` rodam só uma das partes.
+Com os repos da Fase 4 em disco, o `e2e` roda também a parte da Fase 4 (`bin/e2e_fase4.py`,
+cerca de 3 min): sobe um LocalStack (SNS, SQS, DynamoDB) e os bancos de cada serviço, testa a
+Execução e o Faturamento um a um (fazendo o papel do orquestrador e conferindo numa fila de
+sonda o que publicam) e depois **a saga inteira pelos três serviços**: caminho feliz, reparo que
+falha com estorno e devolução de peças, e cancelamento pelo admin. `--fase3` e `--fase4` rodam
+só uma das partes.
+
+**`bin/ws e2e --postman`** (`bin/e2e_postman.py`, cerca de 4 min) sobe o mesmo ambiente com os
+três workers em laço e um gateway local (`tools/e2e/gateway.php`, que roteia por prefixo e roda a
+`auth-cpf`) e roda a coleção `oficina-api/docs/fase-4/postman/` inteira com
+`tools/e2e/postman-runner.js` (Node, sem newman). Mexeu na coleção, em rota ou no fluxo da saga?
+Rode antes de dar por pronto.
 
 Para um comando avulso, use `bin/ws exec <repo> <cmd>`, por exemplo
 `bin/ws exec gateway vendor/bin/phpunit --filter Jwt`. Nos repos, o `make install/test/stan` do

@@ -27,7 +27,7 @@ for repo in oficina-infra-fundacao oficina-infra-cluster oficina-gateway-auth of
   role="$(out ".ci_role_arns.value[\"$repo\"]")"
   commands+=("gh secret set AWS_ROLE_ARN --repo $OWNER/$repo --body $role")
   commands+=("gh secret set AWS_ACCOUNT_ID --repo $OWNER/$repo --body $account")
-  # A api não usa Terraform, mas o README dela lista o TF_STATE_BUCKET entre os esperados.
+  # Os seis usam o bucket: os de infra e, desde a Fase 4, o infra/ de cada serviço.
   commands+=("gh secret set TF_STATE_BUCKET --repo $OWNER/$repo --body $bucket")
   for env in homologacao producao; do
     commands+=("gh api -X PUT repos/$OWNER/$repo/environments/$env --silent")

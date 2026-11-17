@@ -1,9 +1,11 @@
 <?php
 
 // Driver das Lambdas do gateway para o bin/e2e.py: chama os handlers de verdade (classes puras),
-// com o banco do e2e e o segredo em memória, sem AWS.
+// com o segredo em memória, sem AWS. A auth-cpf consulta o cliente na rota interna da aplicação
+// do e2e (OS_BASE_URL), como faz no NLB interno (docs/fase-4/CONTRATOS.md §7, no oficina-api).
 //
 // Uso: php lambda.php auth <cpf>
+//      php lambda.php auth-os-fora <cpf>     (OS fora do ar: espera 503)
 //      php lambda.php authorize <token> <método> <caminho>
 
 declare(strict_types=1);
@@ -12,21 +14,22 @@ require '/gateway/vendor/autoload.php';
 
 use Oficina\Auth\Handler\AuthCpfHandler;
 use Oficina\Auth\Handler\JwtAuthorizerHandler;
-use Oficina\Auth\Repository\PdoCustomerRepository;
+use Oficina\Auth\Repository\HttpCustomerRepository;
 use Oficina\Auth\Secrets\InMemorySecretsProvider;
 
 $secrets = new InMemorySecretsProvider([
-    'auth' => ['JWT_SECRET' => getenv('JWT_SECRET'), 'JWT_EXPIRATION' => getenv('JWT_EXPIRATION')],
+    'auth' => [
+        'JWT_SECRET'     => getenv('JWT_SECRET'),
+        'JWT_EXPIRATION' => getenv('JWT_EXPIRATION'),
+        'INTERNAL_TOKEN' => getenv('INTERNAL_TOKEN'),
+    ],
 ]);
 
 switch ($argv[1] ?? '') {
     case 'auth':
-        $repository = new PdoCustomerRepository(static fn (): PDO => new PDO(
-            sprintf('mysql:host=%s;port=3306;dbname=%s;charset=utf8mb4', getenv('DB_HOST'), getenv('DB_DATABASE')),
-            (string) getenv('DB_USERNAME'),
-            (string) getenv('DB_PASSWORD'),
-            [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC],
-        ));
+    case 'auth-os-fora':
+        $baseUrl    = $argv[1] === 'auth' ? (string) getenv('OS_BASE_URL') : 'http://127.0.0.1:1';
+        $repository = new HttpCustomerRepository($baseUrl, $secrets, 'auth', timeoutSeconds: 2.0);
         $out = (new AuthCpfHandler($repository, $secrets, 'auth'))->handle([
             'body'            => json_encode(['cpf' => $argv[2] ?? '']),
             'isBase64Encoded' => false,

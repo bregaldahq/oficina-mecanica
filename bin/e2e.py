@@ -16,10 +16,11 @@ Depois, se o repo oficina-execucao estiver em disco com o worker, roda a parte d
 
 Usa a branch que estiver em disco em cada repo.
 
-Uso: bin/ws e2e [--keep] [--fase3] [--fase4]
+Uso: bin/ws e2e [--keep] [--fase3] [--fase4] [--postman]
   --keep    deixa os containers de pé para investigar
   --fase3   só a parte da Fase 3
   --fase4   só a parte da Fase 4
+  --postman a coleção Postman da Fase 4 inteira, por um gateway local (bin/e2e_postman.py)
 """
 import json
 import os
@@ -44,6 +45,8 @@ class E2E:
             "DB_HOST": self.db, "DB_PORT": "3306", "DB_DATABASE": "oficina_mecanica", "DB_USERNAME": "root",
             "DB_PASSWORD": "root", "JWT_SECRET": secrets.token_hex(32), "JWT_EXPIRATION": "3600",
             "ADMIN_USERNAME": "admin", "ADMIN_PASSWORD": secrets.token_hex(12), "WEBHOOK_TOKEN": secrets.token_hex(16),
+            "INTERNAL_TOKEN": secrets.token_hex(16),
+            "OS_BASE_URL": f"http://{self.app}:8080",  # a auth-cpf chama a rota interna do OS (Fase 4)
             "APP_ENV": "hml",  # o seed _demo só roda fora de produção
             "MIGRATIONS_PATH": "/migrations",  # as da fundação, como no Job oficina-migrate
         }
@@ -143,6 +146,7 @@ class E2E:
         self.check("auth-cpf: CPF de cliente ativo devolve 200 e token", bool(token), json.dumps(resp))
         self.check("auth-cpf: CPF com dígito inválido devolve 400", self.lambda_("auth", "12345678900").get("statusCode") == 400)
         self.check("auth-cpf: CPF válido não cadastrado devolve 404", self.lambda_("auth", "52998224725").get("statusCode") == 404)
+        self.check("auth-cpf: OS fora do ar devolve 503", self.lambda_("auth-os-fora", cpf).get("statusCode") == 503)
         auth = self.lambda_("authorize", token, "GET", "/api/service-orders/me")
         self.check("jwt-authorizer aceita o token da auth-cpf (role=customer, customerId certo)",
                    auth.get("isAuthorized") is True and auth.get("context", {}).get("role") == "customer"
@@ -156,11 +160,16 @@ class E2E:
         self.check("a aplicação aceita o token emitido pela Lambda: GET /api/service-orders/me 200", status == 200, f"{status} {body}")
         self.check("token de cliente em rota de admin: 403", self.http("GET", "/api/customers", token)[0] == 403)
 
+        # Fase 4: a consulta interna que tira a auth-cpf do banco do OS (docs/fase-4/CONTRATOS.md §7).
+        path = f"/internal/customers/by-document/{cpf}"
+        self.check("consulta interna de cliente sem X-Internal-Token: 401", self.http("GET", path)[0] == 401)
+        status, body = self.http("GET", path, headers={"X-Internal-Token": self.env["INTERNAL_TOKEN"]})
+        self.check("consulta interna de cliente com X-Internal-Token: 200 e o mesmo id da auth-cpf",
+                   status == 200 and json.loads(body or "{}").get("id") == customer_id, f"{status} {body}"[:200])
         order = self.sql("SELECT id FROM service_orders WHERE status = 'AWAITING_APPROVAL' LIMIT 1")
         if order:
-            status = self.http("POST", f"/api/service-orders/{order}/approval", body={"approved": True},
-                               headers={"X-Webhook-Token": "errado"})[0]
-            self.check("webhook de aprovação com X-Webhook-Token errado: 401/403", status in (401, 403), str(status))
+            self.check("rota de aprovação saiu do OS (foi para o Faturamento): 404",
+                       self.http("POST", f"/api/service-orders/{order}/approval", admin, body={"approved": True})[0] == 404)
         return self.finish()
 
     def finish(self) -> int:
@@ -179,6 +188,10 @@ def main() -> int:
     if subprocess.run(["docker", "info"], capture_output=True).returncode != 0:
         print("o Docker não está rodando")
         return 1
+    if "--postman" in sys.argv:
+        import e2e_postman
+
+        return e2e_postman.main()
     keep = "--keep" in sys.argv
     e2e = E2E()
     fase4 = Fase4E2E(e2e.check)

@@ -80,6 +80,47 @@ COMPOSER = tool("composer install --no-interaction --prefer-dist --no-progress")
 # Sem o shellcheck embutido: só sintaxe, expressões e tipos dos workflows, que são erro de verdade.
 ACTIONLINT = tool("actionlint -shellcheck= -pyflakes=")
 
+# Comandos que terminam com 0 mesmo quando o que vem antes no pipe falhou. No fim de um pipe sem
+# pipefail, eles escondem a falha: `check-coverage.php | tee` passava com 60% de cobertura.
+MASKING = r"tee|head|tail|sed|awk|cat|sort|uniq|cut|tr|column|less|more"
+MASKED_PIPE = re.compile(rf"(?<![|])\|(?![|])\s*(?:{MASKING})\b")
+
+
+def unsafe_pipes(repo: Path) -> list[str]:
+    """Passos `run` com pipe que mascara a falha e sem pipefail (o shell padrão do Actions é
+    `bash -e {0}`, sem pipefail; `shell: bash` explícito liga o pipefail)."""
+    try:
+        import yaml
+    except ImportError:  # sem PyYAML no host: o actionlint segue valendo
+        return []
+    found = []
+    for wf in sorted((repo / ".github" / "workflows").glob("*.y*ml")):
+        doc = yaml.safe_load(wf.read_text(encoding="utf-8")) or {}
+        default = ((doc.get("defaults") or {}).get("run") or {}).get("shell")
+        for job_name, job in (doc.get("jobs") or {}).items():
+            job_shell = ((job.get("defaults") or {}).get("run") or {}).get("shell") or default
+            for step in job.get("steps") or []:
+                run = step.get("run")
+                if not isinstance(run, str) or step.get("shell") or job_shell or "pipefail" in run:
+                    continue
+                for line in run.splitlines():
+                    # Pipe dentro de $(...) só monta um valor; o que vale é o pipe do comando.
+                    bare = line
+                    while (stripped := re.sub(r"\$\([^()]*\)", "", bare)) != bare:
+                        bare = stripped
+                    if not line.strip().startswith("#") and MASKED_PIPE.search(bare):
+                        found.append(f"{wf.name}: job {job_name}, passo '{step.get('name', '?')}': {line.strip()}")
+                        break
+    return found
+
+
+def workflows(repo: Path, log: TextIO) -> bool:
+    ok = ACTIONLINT(repo, log)
+    bad = unsafe_pipes(repo)
+    for item in bad:
+        log.write(f"pipe sem pipefail mascara a falha (use `shell: bash` ou `set -o pipefail`): {item}\n")
+    return ok and not bad
+
 FORBIDDEN_SQL = re.compile(r"^\s*(CREATE DATABASE|USE |DELIMITER)", re.I | re.M)
 
 
@@ -170,7 +211,7 @@ SERVICE_STEPS = [
     Step("tf-validate", tool("cd infra && terraform init -backend=false -input=false -no-color >/dev/null"
                              " && terraform validate -no-color"), "pr.yml: terraform validate (infra/)"),
     Step("image", app_image, "pr.yml: build da imagem e extensão New Relic", image=True),
-    Step("workflows", ACTIONLINT, "fora do CI: workflow inválido nem carrega no GitHub"),
+    Step("workflows", workflows, "fora do CI: workflow inválido, ou pipe que esconde a falha de um passo"),
 ]
 
 STEPS: dict[str, list[Step]] = {
@@ -181,14 +222,14 @@ STEPS: dict[str, list[Step]] = {
         Step("tf-validate", TF_VALIDATE, "pr.yml: terraform validate (aqui sem backend)"),
         Step("sql-lint", sql_lint, "pr.yml: sem CREATE DATABASE, USE nem DELIMITER"),
         Step("migrations-2x", migrations_twice, "pr.yml: migrations duas vezes num MySQL 8.0 e seed", slow=True),
-        Step("workflows", ACTIONLINT, "fora do CI: workflow inválido nem carrega no GitHub"),
+        Step("workflows", workflows, "fora do CI: workflow inválido, ou pipe que esconde a falha de um passo"),
     ],
     "oficina-infra-cluster": [
         Step("tf-fmt", TF_FMT, "pr.yml: terraform fmt"),
         Step("tf-validate", TF_VALIDATE, "pr.yml: terraform validate"),
         Step("tflint", tool("tflint --init >/dev/null && tflint --recursive"),
              "pr.yml: tflint (continue-on-error)", blocking=False),
-        Step("workflows", ACTIONLINT, "fora do CI: workflow inválido nem carrega no GitHub"),
+        Step("workflows", workflows, "fora do CI: workflow inválido, ou pipe que esconde a falha de um passo"),
     ],
     "oficina-gateway-auth": [
         Step("composer", COMPOSER, "pr.yml: composer install"),
@@ -197,20 +238,10 @@ STEPS: dict[str, list[Step]] = {
         Step("phpstan", tool("vendor/bin/phpstan analyse --no-progress"), "pr.yml: PHPStan nível 8"),
         Step("tf-fmt", TF_FMT, "pr.yml: terraform fmt"),
         Step("tf-validate", TF_VALIDATE, "pr.yml: terraform validate"),
-        Step("workflows", ACTIONLINT, "fora do CI: workflow inválido nem carrega no GitHub"),
+        Step("workflows", workflows, "fora do CI: workflow inválido, ou pipe que esconde a falha de um passo"),
     ],
-    "oficina-api": [
-        Step("composer", COMPOSER, "pr.yml: composer install"),
-        # --using-cache=no: o .php-cs-fixer.cache da aplicação é versionado e o dry-run o reescreve.
-        Step("cs-fixer", tool("PHP_CS_FIXER_IGNORE_ENV=1 vendor/bin/php-cs-fixer fix --dry-run --diff --using-cache=no"),
-             "pr.yml: estilo (PSR-12)"),
-        Step("phpstan", tool("vendor/bin/phpstan analyse --no-progress --memory-limit=512M"), "pr.yml: PHPStan"),
-        Step("phpunit", tool("vendor/bin/phpunit --no-coverage"), "pr.yml: testes unitários e de integração"),
-        Step("kustomize", tool("kustomize build deploy/overlays/hml >/dev/null"
-                               " && kustomize build deploy/overlays/prod >/dev/null"), "pr.yml: manifests"),
-        Step("image", app_image, "pr.yml: build da imagem e extensão New Relic", image=True),
-        Step("workflows", ACTIONLINT, "fora do CI: workflow inválido nem carrega no GitHub"),
-    ],
+    # Fase 4: o serviço de OS tem a mesma forma dos outros dois (cobertura de 80%, Behat, infra/).
+    "oficina-api": SERVICE_STEPS,
     WORKSPACE: [
         Step("shellcheck", tool("shellcheck -x bin/ws bin/tooling .claude/hooks/*.sh githooks/* evals/lib.sh evals/*/*.sh bootstrap/aws/github.sh"), "-"),
         Step("python", python_compiles, "-"),

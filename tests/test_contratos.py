@@ -449,6 +449,49 @@ class ContratosTest(unittest.TestCase):
         self.assertNotIn(("SSM-3", "execucao/queue_url"), achados)
         self.assertNotIn(("SSM-1", "execucao/queue_url"), achados)
 
+    def com_servico(self, c, short: str, files: dict) -> None:
+        root = Path(c.tmp.name) / contratos.REPOS[short][0]
+        for rel, content in files.items():
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / rel).write_text(content)
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
+        c.repos.paths[short] = root
+
+    BILLING_INDEX = ("<?php\nconst PREFIX  = '/api/billing';\n"
+                     "$router->get(PREFIX . '/health', fn () => 1, requireAuth: false);\n"
+                     "$router->get(PREFIX . '/budgets', fn () => 1)->requireRole('admin');\n")
+    BILLING_GW = ('\nresource "aws_apigatewayv2_integration" "billing_proxy" {\n  integration_type = "HTTP_PROXY"\n}\n'
+                  'resource "aws_apigatewayv2_route" "billing_health" {\n  route_key = "GET /api/billing/health"\n'
+                  '  target = "integrations/${aws_apigatewayv2_integration.billing_proxy.id}"\n  authorization_type = "NONE"\n}\n')
+
+    def test_rota_publica_de_servico_precisa_de_rota_dedicada_para_ele(self):
+        with Cenario() as c:
+            self.com_servico(c, "faturamento", {"public/index.php": self.BILLING_INDEX, "deploy/base/nginx-configmap.yaml": ""})
+            achados = [(f.id, f.chave) for f in c.run()]
+        self.assertIn(("ROTA-1", "GET /api/billing/health"), achados)
+
+        gw = GREEN["gateway"]["apigateway.tf"] + self.BILLING_GW
+        with Cenario({"gateway": {"apigateway.tf": gw}}) as c:
+            self.com_servico(c, "faturamento", {"public/index.php": self.BILLING_INDEX, "deploy/base/nginx-configmap.yaml": ""})
+            achados = [(f.id, f.chave) for f in c.run()]
+        self.assertNotIn(("ROTA-1", "GET /api/billing/health"), achados)
+
+    def test_rota_interna_fica_fora_do_gateway(self):
+        index = GREEN["api"]["public/index.php"] + "\n$router->get('/internal/customers/{d}', fn () => 1, requireAuth: false);\n"
+        with Cenario({"api": {"public/index.php": index}}) as c:
+            achados = [f for f in c.run() if "/internal/" in f.chave]
+        self.assertEqual(achados, [], "a rota interna não precisa de rota no gateway")
+
+        gw = GREEN["gateway"]["apigateway.tf"] + ('\nresource "aws_apigatewayv2_route" "x" {\n  route_key = "GET /internal/customers/{d}"\n'
+                                                   '  target = "integrations/${aws_apigatewayv2_integration.app_proxy.id}"\n  authorization_type = "NONE"\n}\n')
+        self.assertFinds({"gateway": {"apigateway.tf": gw}}, "ROTA-5")
+
+    def test_rota_removida_pelo_contrato_da_fase_4_nao_e_documento_desatualizado(self):
+        f4 = "## 4. Rotas\n\n**Removidas do OS:**\n\n- `POST /api/service-orders/{id}/approval`: passa para o Faturamento.\n\n## 5. X\n"
+        with Cenario({"api": {contratos.CONTRATOS_F4: f4}}) as c:
+            self.assertIn(contratos.rotas.norm("POST /api/service-orders/{id}/approval"), contratos.rotas.removed_in_f4(c.repos))
+
     def test_role_de_ci_de_repo_da_fase_4_nao_tem_nome_antigo(self):
         achados = self.ids({"cluster": {"envs/fase4.tfvars": 'x = "arn:aws:iam::1:role/oficina-gha-oficina-faturamento"\n'}})
         self.assertEqual([a for a in achados if a[0] == "NOME-1"], [])
