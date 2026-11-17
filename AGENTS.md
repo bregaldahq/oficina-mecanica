@@ -176,7 +176,7 @@ bin/ws ci [<branch>]               # último run de cada workflow; log do que fa
 bin/ws diff [--patch]              # o que mudou contra origin/develop
 bin/ws grep -E 'padrão'            # busca nos quatro repos (só arquivos versionados ou novos)
 bin/ws verify [--changed] [--fast] # o que o pr.yml roda, local e sem AWS (ver "Validação local")
-bin/ws e2e                         # ponta a ponta entre os repos, sem AWS: migrations, app, Lambdas, JWT
+bin/ws e2e [--postman]             # ponta a ponta entre os repos, sem AWS; --postman roda a coleção da Fase 4
 bin/ws exec <repo> <cmd...>        # comando na imagem de ferramentas (PHP, Composer, Terraform...)
 bin/ws branch <nome> <repo...>     # mesma branch nos repos indicados, a partir de origin/develop
 bin/ws isolate <b> <repo...>       # worktrees próprios desta sessão (sessões paralelas)
@@ -279,6 +279,12 @@ Execução e o Faturamento um a um (fazendo o papel do orquestrador e conferindo
 sonda o que publicam) e depois **a saga inteira pelos três serviços**: caminho feliz, reparo que
 falha com estorno e devolução de peças, e cancelamento pelo admin. `--fase3` e `--fase4` rodam
 só uma das partes.
+
+**`bin/ws e2e --postman`** (`bin/e2e_postman.py`, cerca de 4 min) sobe o mesmo ambiente com os
+três workers em laço e um gateway local (`tools/e2e/gateway.php`, que roteia por prefixo e roda a
+`auth-cpf`) e roda a coleção `oficina-api/docs/fase-4/postman/` inteira com
+`tools/e2e/postman-runner.js` (Node, sem newman). Mexeu na coleção, em rota ou no fluxo da saga?
+Rode antes de dar por pronto.
 
 Para um comando avulso, use `bin/ws exec <repo> <cmd>`, por exemplo
 `bin/ws exec gateway vendor/bin/phpunit --filter Jwt`. Nos repos, o `make install/test/stan` do

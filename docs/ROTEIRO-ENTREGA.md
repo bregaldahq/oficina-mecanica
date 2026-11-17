@@ -86,7 +86,7 @@ hml.
 | 3 | execucao | [#1](https://github.com/bregaldahq/oficina-execucao/pull/1), [#2](https://github.com/bregaldahq/oficina-execucao/pull/2), [#3](https://github.com/bregaldahq/oficina-execucao/pull/3) | — |
 | 4 | api | [#28](https://github.com/bregaldahq/oficina-api/pull/28), [#29](https://github.com/bregaldahq/oficina-api/pull/29), [#30](https://github.com/bregaldahq/oficina-api/pull/30), [#31](https://github.com/bregaldahq/oficina-api/pull/31), [#32](https://github.com/bregaldahq/oficina-api/pull/32) | Faturamento e Execução no ar em hml; `bootstrap/aws/` reaplicado |
 | 5 | gateway | [#14](https://github.com/bregaldahq/oficina-gateway-auth/pull/14), depois [#15](https://github.com/bregaldahq/oficina-gateway-auth/pull/15) | o OS da Etapa 5 no ar (a `auth-cpf` nova chama a rota interna dele) |
-| 6 | fundação | [#16](https://github.com/bregaldahq/oficina-infra-fundacao/pull/16) migration 005 | o OS da Etapa 5 no ar em hml (o OS antigo lê as tabelas que ela apaga) |
+| 6 | fundação | [#16](https://github.com/bregaldahq/oficina-infra-fundacao/pull/16) migration 005 | o OS da Etapa 5 no ar em hml e estável: depois da 005, voltar a imagem do OS para a da Fase 3 não funciona mais (ela lê as tabelas que a 005 apaga) |
 | 7 | workspace | [#6](https://github.com/bregaldahq/oficina-mecanica/pull/6), [#7](https://github.com/bregaldahq/oficina-mecanica/pull/7), [#8](https://github.com/bregaldahq/oficina-mecanica/pull/8), [#9](https://github.com/bregaldahq/oficina-mecanica/pull/9), [#10](https://github.com/bregaldahq/oficina-mecanica/pull/10) | depois do gateway (o e2e usa a `auth-cpf` nova) |
 
 Ainda abertos da Fase 3, para você decidir: api [#20](https://github.com/bregaldahq/oficina-api/pull/20),
@@ -99,7 +99,7 @@ fundação [#6](https://github.com/bregaldahq/oficina-infra-fundacao/pull/6) e
 ## 5. Conferir em hml
 
 1. O `deploy.yml` de cada serviço terminou verde (testes, `infra/`, imagem, rollout, smoke).
-2. **Postman:** importe `oficina-api/docs/fase-4/postman/` (coleção e ambiente), preencha
+2. **Postman** (a coleção já roda inteira sem AWS: `bin/ws e2e --postman`, 40 de 40): importe `oficina-api/docs/fase-4/postman/` (coleção e ambiente), preencha
    `baseUrl` (`/oficina/hml/apigw/endpoint`), `adminPassword` e `webhookToken` (chave
    `WEBHOOK_TOKEN` do segredo `oficina/hml/auth`), e rode as pastas em ordem, com delay de
    3000 ms no runner. A pasta 6 pede o pagamento no sandbox, pelo `payment_url`.
