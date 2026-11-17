@@ -5,8 +5,6 @@
 | | |
 |---|---|
 | Autor | Ricardo Bregalda |
-| RM | _a preencher_ |
-| Vídeo (até 15 min) | _a preencher_ |
 | Repositório principal | <https://github.com/bregaldahq/oficina-mecanica> |
 
 ## 1. Repositórios
@@ -26,6 +24,16 @@ outro.
 
 ## 2. Arquitetura
 
+- **REST** do cliente para cada serviço, pelo API Gateway: `/api/...` (OS), `/api/billing/...`
+  (Faturamento) e `/api/execution/...` (Execução). Cada prefixo vai para um listener próprio do
+  NLB interno.
+- **Mensageria** entre os serviços: um tópico SNS e, por serviço, uma fila SQS com DLQ e filtro
+  pelo tipo da mensagem. Os serviços não se chamam por HTTP.
+- **Única chamada síncrona interna:** a Lambda `auth-cpf` consulta o cliente na rota interna do
+  OS (`GET /internal/customers/by-document/{cpf}`, com token interno), e não mais no banco dele.
+- **Outbox e inbox** (ADR-017): estado e mensagem são gravados na mesma transação; quem consome
+  registra o id da mensagem na mesma transação do efeito, e mensagem repetida não repete efeito.
+
 ```mermaid
 flowchart TB
     cli(["Cliente, atendente, mecânico"]) -->|"REST + JWT"| gw["API Gateway<br/>Lambdas auth-cpf e jwt-authorizer"]
@@ -43,16 +51,6 @@ flowchart TB
 
 Versão resumida; o diagrama completo, com sub-redes, listeners e filas, está em
 `oficina-api/docs/fase-4/diagramas/arquitetura.md`.
-
-- **REST** do cliente para cada serviço, pelo API Gateway: `/api/...` (OS), `/api/billing/...`
-  (Faturamento) e `/api/execution/...` (Execução). Cada prefixo vai para um listener próprio do
-  NLB interno.
-- **Mensageria** entre os serviços: um tópico SNS e, por serviço, uma fila SQS com DLQ e filtro
-  pelo tipo da mensagem. Os serviços não se chamam por HTTP.
-- **Única chamada síncrona interna:** a Lambda `auth-cpf` consulta o cliente na rota interna do
-  OS (`GET /internal/customers/by-document/{cpf}`, com token interno), e não mais no banco dele.
-- **Outbox e inbox** (ADR-017): estado e mensagem são gravados na mesma transação; quem consome
-  registra o id da mensagem na mesma transação do efeito, e mensagem repetida não repete efeito.
 
 ### Bancos: um SQL e um NoSQL
 
