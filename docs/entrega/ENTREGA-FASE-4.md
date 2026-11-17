@@ -109,7 +109,7 @@ chave de idempotência.
 
 | Serviço | Testes | Cobertura de linhas de `src/` | BDD (Behat) |
 |---|---|---|---|
-| OS | 233 | 92,0% | 6 cenários da saga: fluxo completo, reparo que falha e é estornado, orçamento recusado, prazo vencido, compensação que nunca confirma, evento repetido ou fora de hora |
+| OS | 237 | 92,2% | 6 cenários da saga: fluxo completo, reparo que falha e é estornado, orçamento recusado, prazo vencido, compensação que nunca confirma, evento repetido ou fora de hora |
 | Faturamento | 178 | 92,8% | 7 cenários: fluxo completo, estoque insuficiente, recusa, compensação do reparo, prazo vencido com pagamento confirmado, pagamento depois do cancelamento, aviso repetido do Mercado Pago |
 | Execução | 139 | 95,1% | 5 cenários: fluxo completo, falha do reparo, cancelamento por compensação, mensagem duplicada, compensação repetida |
 
@@ -120,6 +120,8 @@ chave de idempotência.
 - **Ponta a ponta sem AWS:** `bin/ws e2e`, no repositório principal, sobe os três serviços com os
   próprios bancos e um LocalStack (SNS, SQS, DynamoDB) e percorre a saga inteira: caminho feliz,
   reparo que falha com estorno e devolução de peças, e cancelamento pelo admin (107 checagens).
+  `bin/ws e2e --postman` roda a coleção Postman inteira pelos três serviços, por um gateway local
+  (40 requisições).
 
 ## 6. CI/CD
 
