@@ -72,28 +72,39 @@ autor só). Os jobs de `plan` dos repos de infra ficam de fora: dependem da cont
 2. O role da api em `app_ci_role_arn`, nos `envs/*.tfvars` do cluster (o `github.sh` imprime o
    valor).
 
-## 4. Merges, na ordem
+## 4. Deploy em hml, na ordem
 
-Um PR por repositório (as pilhas antigas se desfizeram no merge: o GitHub fechou os PRs cuja
-base foi apagada). Merge em `develop` dispara o deploy em hml. Nos repositórios antigos a
-`develop` exige uma aprovação: como dono, use `gh pr merge <n> --merge --admin`.
+Os merges da Fase 4 já estão na `develop` de cada repositório (em 2026-11-17), menos a migration
+005 ([fundação #17](https://github.com/bregaldahq/oficina-infra-fundacao/pull/17), rascunho de
+propósito). Os deploys que esses merges dispararam falharam porque a conta AWS estava desligada;
+com o passo 3 feito, rode-os de novo nesta ordem. Na fundação, no cluster e no gateway o deploy é
+**sempre manual**; nos três serviços, merge em `develop` dispara o de hml, e *Run workflow* na
+`develop` refaz.
 
-| # | Repositório | PR | Antes, confirme |
+| # | Repositório | Como | Antes, confirme |
 |---|---|---|---|
-| 1 | fundação | migration 004: já na `develop` (#15) | — |
-| 2 | faturamento | [#4](https://github.com/bregaldahq/oficina-faturamento/pull/4) (o serviço já está na `develop`, #1) | passo 2 (Mercado Pago) feito logo após o deploy |
-| 3 | execucao | [#4](https://github.com/bregaldahq/oficina-execucao/pull/4) (o serviço já está na `develop`, #1) | — |
-| 4 | api | [#33](https://github.com/bregaldahq/oficina-api/pull/33): a saga, a borda, a observabilidade e a entrega (só o #28 entrou na `develop`) | Faturamento e Execução no ar em hml; `bootstrap/aws/` reaplicado |
-| 5 | gateway | [#16](https://github.com/bregaldahq/oficina-gateway-auth/pull/16) (os prefixos por serviço já estão na `develop`, #14) | a OS da Fase 4 no ar (a `auth-cpf` nova chama a rota interna dela) |
-| 6 | fundação | [#17](https://github.com/bregaldahq/oficina-infra-fundacao/pull/17), rascunho: migration 005 | a OS da Fase 4 no ar em hml e estável: depois da 005, voltar a imagem da OS para a da Fase 3 não funciona mais |
-| 7 | workspace | [#11](https://github.com/bregaldahq/oficina-mecanica/pull/11) (reúne o que os #7 a #10 tinham; o #6 já está na `main`) | — |
+| 1 | fundação | *Actions → Deploy → Run workflow*, `develop`, ambiente `hml` (tópico SNS, `INTERNAL_TOKEN`, endpoint do Secrets Manager aberto à VPC) | passo 3 |
+| 2 | cluster | *Actions → Deploy → Run workflow*, `develop`, `hml` (listeners e target groups dos três serviços, RBAC, policy do External Secrets) | fundação aplicada |
+| 3 | faturamento e execucao | *Actions → Deploy → Run workflow* na `develop` | cluster aplicado; logo depois do Faturamento, o segredo do Mercado Pago (passo 2) e um rollout do Deployment |
+| 4 | api | *Actions → Deploy → Run workflow* na `develop` (roda a migration 004) | Faturamento e Execução no ar |
+| 5 | gateway | *Actions → Deploy → Run workflow*, `develop` (prefixos por serviço e a `auth-cpf` pela rota interna da OS) | a OS da Fase 4 no ar: a `auth-cpf` nova chama a rota interna dela |
+| 6 | fundação | merge do [#17](https://github.com/bregaldahq/oficina-infra-fundacao/pull/17) (migration 005) e de novo o deploy da api, que aplica a migration | a OS da Fase 4 no ar e estável: depois da 005, voltar a imagem da OS para a da Fase 3 não funciona mais |
 
-Ainda abertos da Fase 3, para você decidir: api [#20](https://github.com/bregaldahq/oficina-api/pull/20),
-fundação [#6](https://github.com/bregaldahq/oficina-infra-fundacao/pull/6) e
-[#7](https://github.com/bregaldahq/oficina-infra-fundacao/pull/7), cluster
-[#10](https://github.com/bregaldahq/oficina-infra-cluster/pull/10) e
-[#11](https://github.com/bregaldahq/oficina-infra-cluster/pull/11). Os `develop → main`
-(api #23, gateway #10, fundação #9, cluster #13) ficam para o passo 6.
+Nos repositórios antigos a `develop` exige uma aprovação: como dono, `gh pr merge <n> --merge --admin`.
+
+**PRs antigos da Fase 3, revisados em 2026-11-17: feche sem merge.**
+
+- Fundação [#6](https://github.com/bregaldahq/oficina-infra-fundacao/pull/6) e
+  [#7](https://github.com/bregaldahq/oficina-infra-fundacao/pull/7), cluster
+  [#10](https://github.com/bregaldahq/oficina-infra-cluster/pull/10) e
+  [#11](https://github.com/bregaldahq/oficina-infra-cluster/pull/11): a correção do `deploy.yml`
+  já está na `develop`, e tirar o `terraform plan` do PR jogaria fora o plan do cluster, que já é
+  melhor que o de setembro. Substituídos pelos PRs `ci/fase-4-workflows`: o plan fica, e é
+  pulado com aviso quando a conta AWS está fora do ar.
+- api [#20](https://github.com/bregaldahq/oficina-api/pull/20): é de antes da Fase 4, tem
+  conflito e reverteria boa parte dela. A ideia dele (produção só por disparo manual) entrou nos
+  PRs `ci/fase-4-workflows` da api, do Faturamento e da Execução.
+- Os `develop → main` (api #23, gateway #10, fundação #9, cluster #13) ficam para o passo 6.
 
 ## 5. Conferir em hml
 
@@ -112,8 +123,9 @@ fundação [#6](https://github.com/bregaldahq/oficina-infra-fundacao/pull/6) e
 ## 6. Produção e encerramento
 
 1. `develop → main` em cada repo, na ordem de apply (`/release` no Claude Code prepara o
-   changelog e os riscos de cada um). A migration 005 só entra em `main` com o OS da Etapa 5 já em
-   produção.
+   changelog e os riscos de cada um). O merge em `main` **não** aplica nada: produção sobe só por
+   *Actions → Deploy → Run workflow* com a ref `main`, em todos os repositórios, na mesma ordem
+   do passo 4. A migration 005 só entra em `main` com a OS da Fase 4 já em produção.
 2. **Custo:** o ambiente cobra por hora (EKS, nodes, os dois RDS). Terminada a avaliação,
    destrua na ordem inversa à de apply, **serviços → gateway → cluster → fundação**:
    1. os três serviços: *Actions → Destroy* em `oficina-faturamento`, `oficina-execucao` e
