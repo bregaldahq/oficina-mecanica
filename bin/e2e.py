@@ -16,10 +16,11 @@ Depois, se o repo oficina-execucao estiver em disco com o worker, roda a parte d
 
 Usa a branch que estiver em disco em cada repo.
 
-Uso: bin/ws e2e [--keep] [--fase3] [--fase4]
+Uso: bin/ws e2e [--keep] [--fase3] [--fase4] [--postman]
   --keep    deixa os containers de pé para investigar
   --fase3   só a parte da Fase 3
   --fase4   só a parte da Fase 4
+  --postman a coleção Postman da Fase 4 inteira, por um gateway local (bin/e2e_postman.py)
 """
 import json
 import os
@@ -187,6 +188,10 @@ def main() -> int:
     if subprocess.run(["docker", "info"], capture_output=True).returncode != 0:
         print("o Docker não está rodando")
         return 1
+    if "--postman" in sys.argv:
+        import e2e_postman
+
+        return e2e_postman.main()
     keep = "--keep" in sys.argv
     e2e = E2E()
     fase4 = Fase4E2E(e2e.check)

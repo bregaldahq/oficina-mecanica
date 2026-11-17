@@ -71,7 +71,8 @@ class Fase4E2E:
     def aws(self, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess:
         return subprocess.run(["docker", "exec", "-i", self.ls, *args], input=stdin, capture_output=True, text=True)
 
-    def php(self, *args: str, detach: bool = False, billing: bool = False, service: str = "") -> subprocess.CompletedProcess:
+    def php(self, *args: str, detach: bool = False, billing: bool = False, service: str = "",
+            container: str = "") -> subprocess.CompletedProcess:
         service = service or ("faturamento" if billing else "execucao")
         repo, name = {"execucao": (self.repo, self.app), "faturamento": (self.billing, self.billing_app),
                       "os": (self.os_repo, self.os_app)}[service]
@@ -86,7 +87,7 @@ class Fase4E2E:
         for key, value in {**self.env, **extra}.items():
             cmd += ["-e", f"{key}={value}"]
         if detach:
-            cmd[2:2] = ["-d", "--name", name]
+            cmd[2:2] = ["-d", "--name", container or name]
         return subprocess.run(cmd + [image, *args], capture_output=True, text=True)
 
     def http(self, method: str, path: str, token: str = "", body: dict | None = None, billing: bool = False,

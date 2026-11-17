@@ -1,7 +1,7 @@
 # Oficina Mecânica — repositório principal
 
 Este é o repositório principal do projeto, `oficina-mecanica`, mas ele não tem código de produto.
-Ele junta os quatro repositórios do sistema da Oficina Mecânica (Tech Challenge SOAT, Fase 3)
+Ele junta os seis repositórios do sistema da Oficina Mecânica (Tech Challenge SOAT, Fases 3 e 4)
 para que um agente, ou uma pessoa, enxergue e mude o sistema inteiro de um lugar só. Os
 repositórios ficam em `repos/`, que não é versionado aqui: cada um continua com o próprio Git, as
 próprias branches e o próprio CI.
@@ -24,19 +24,21 @@ PRs antigos, a chave do state do Terraform, os roles de CI (`oficina-gha-<nome-a
 Ordem de `apply`: **fundação → cluster → gateway → api**, e depois cada serviço da Fase 4
 (`infra/`, depois deploy). Ordem de `destroy`: inversa.
 
-## Fase 4 em andamento
+## Fase 4
 
-O sistema está sendo dividido em três microsserviços: o `oficina-api` vira o serviço de OS (e
-orquestrador da saga), e nascem o `oficina-faturamento` e o `oficina-execucao`. O plano e o
+O sistema foi dividido em três microsserviços: o `oficina-api` virou o serviço de OS (e
+orquestrador da saga), e nasceram o `oficina-faturamento` e o `oficina-execucao`. O plano e o
 andamento estão em `docs/PLANO-FASE-4.md`; o desenho normativo, em
-`repos/oficina-api/docs/fase-4/` (`CONTRATOS.md`, ADRs 011 a 017, diagramas).
+`repos/oficina-api/docs/fase-4/` (`CONTRATOS.md`, adendos F4-1 a F4-5, ADRs 011 a 017,
+diagramas). O que falta para pôr no ar (passos do usuário) está em `docs/ROTEIRO-ENTREGA.md`.
 
-- **O que roda em produção ainda é a Fase 3.** O resto deste arquivo descreve esse sistema. O
-  contrato da Fase 4 soma ao da Fase 3, e cada item só vale depois de implementado.
-- Os três serviços estão implementados e a saga atravessa os três (`bin/ws e2e --fase4`). Cada
-  um tem prefixo próprio no gateway (`/api/...` para a OS, `/api/billing`, `/api/execution`),
-  worker, `infra/`, pipelines com cobertura mínima de 80% e BDD. Falta a `auth-cpf` deixar o
-  banco da OS (Etapa 6 do plano).
+- **Implementada nos seis repos, em PRs empilhados; o que roda nos ambientes é o que já entrou
+  em `develop`/`main`.** Partes deste arquivo ainda descrevem o sistema da Fase 3 (o desenho de
+  ponta a ponta abaixo, por exemplo); o contrato da Fase 4 soma ao da Fase 3.
+- Os três serviços estão implementados e a saga atravessa os três (`bin/ws e2e --fase4`, e a
+  coleção Postman com `bin/ws e2e --postman`). Cada um tem prefixo próprio no gateway (`/api/...`
+  para a OS, `/api/billing`, `/api/execution`), worker, `infra/`, pipelines com cobertura mínima
+  de 80% e BDD. A `auth-cpf` consulta o cliente na rota interna da OS e não lê mais o banco dela.
 - Nos comandos, os nomes curtos novos são `faturamento` e `execucao`.
 - Os serviços conversam por mensagens (SNS + SQS), nunca por HTTP entre si nem pelo banco um
   do outro. Tipo de mensagem novo entra no catálogo (§5 do contrato da Fase 4), no produtor e
@@ -176,7 +178,7 @@ bin/ws ci [<branch>]               # último run de cada workflow; log do que fa
 bin/ws diff [--patch]              # o que mudou contra origin/develop
 bin/ws grep -E 'padrão'            # busca nos quatro repos (só arquivos versionados ou novos)
 bin/ws verify [--changed] [--fast] # o que o pr.yml roda, local e sem AWS (ver "Validação local")
-bin/ws e2e                         # ponta a ponta entre os repos, sem AWS: migrations, app, Lambdas, JWT
+bin/ws e2e [--postman]             # ponta a ponta entre os repos, sem AWS; --postman roda a coleção da Fase 4
 bin/ws exec <repo> <cmd...>        # comando na imagem de ferramentas (PHP, Composer, Terraform...)
 bin/ws branch <nome> <repo...>     # mesma branch nos repos indicados, a partir de origin/develop
 bin/ws isolate <b> <repo...>       # worktrees próprios desta sessão (sessões paralelas)
@@ -279,6 +281,12 @@ Execução e o Faturamento um a um (fazendo o papel do orquestrador e conferindo
 sonda o que publicam) e depois **a saga inteira pelos três serviços**: caminho feliz, reparo que
 falha com estorno e devolução de peças, e cancelamento pelo admin. `--fase3` e `--fase4` rodam
 só uma das partes.
+
+**`bin/ws e2e --postman`** (`bin/e2e_postman.py`, cerca de 4 min) sobe o mesmo ambiente com os
+três workers em laço e um gateway local (`tools/e2e/gateway.php`, que roteia por prefixo e roda a
+`auth-cpf`) e roda a coleção `oficina-api/docs/fase-4/postman/` inteira com
+`tools/e2e/postman-runner.js` (Node, sem newman). Mexeu na coleção, em rota ou no fluxo da saga?
+Rode antes de dar por pronto.
 
 Para um comando avulso, use `bin/ws exec <repo> <cmd>`, por exemplo
 `bin/ws exec gateway vendor/bin/phpunit --filter Jwt`. Nos repos, o `make install/test/stan` do
