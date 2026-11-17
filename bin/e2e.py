@@ -45,6 +45,7 @@ class E2E:
             "DB_PASSWORD": "root", "JWT_SECRET": secrets.token_hex(32), "JWT_EXPIRATION": "3600",
             "ADMIN_USERNAME": "admin", "ADMIN_PASSWORD": secrets.token_hex(12), "WEBHOOK_TOKEN": secrets.token_hex(16),
             "INTERNAL_TOKEN": secrets.token_hex(16),
+            "OS_BASE_URL": f"http://{self.app}:8080",  # a auth-cpf chama a rota interna do OS (Fase 4)
             "APP_ENV": "hml",  # o seed _demo só roda fora de produção
             "MIGRATIONS_PATH": "/migrations",  # as da fundação, como no Job oficina-migrate
         }
@@ -144,6 +145,7 @@ class E2E:
         self.check("auth-cpf: CPF de cliente ativo devolve 200 e token", bool(token), json.dumps(resp))
         self.check("auth-cpf: CPF com dígito inválido devolve 400", self.lambda_("auth", "12345678900").get("statusCode") == 400)
         self.check("auth-cpf: CPF válido não cadastrado devolve 404", self.lambda_("auth", "52998224725").get("statusCode") == 404)
+        self.check("auth-cpf: OS fora do ar devolve 503", self.lambda_("auth-os-fora", cpf).get("statusCode") == 503)
         auth = self.lambda_("authorize", token, "GET", "/api/service-orders/me")
         self.check("jwt-authorizer aceita o token da auth-cpf (role=customer, customerId certo)",
                    auth.get("isAuthorized") is True and auth.get("context", {}).get("role") == "customer"
