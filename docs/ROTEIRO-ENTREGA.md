@@ -6,8 +6,8 @@ os comandos prontos. O vídeo fica de fora.
 
 Estado em 2026-11-16: os seis repositórios estão implementados e verificados sem AWS
 (`bin/ws verify`, `bin/ws e2e`: 20 + 87 checagens). O PDF de entrega está em
-[`entrega/ENTREGA-FASE-4.pdf`](entrega/ENTREGA-FASE-4.pdf); falta preencher o RM e o link do vídeo
-no [`entrega/ENTREGA-FASE-4.md`](entrega/ENTREGA-FASE-4.md) e gerar de novo
+[`entrega/ENTREGA-FASE-4.pdf`](entrega/ENTREGA-FASE-4.pdf); para mudar, edite o
+[`entrega/ENTREGA-FASE-4.md`](entrega/ENTREGA-FASE-4.md) e gere de novo
 (`python3 docs/entrega/gerar.py`).
 
 ## 1. GitHub: branch padrão e proteção (R10)
